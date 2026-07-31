@@ -1,5 +1,6 @@
-from httpx import AsyncClient
+from httpx import AsyncClient, HTTPStatusError
 
+from connector_lab.client.errors import ConnectorAuthenticationError
 from connector_lab.client.models import AlertCollection
 
 
@@ -20,6 +21,14 @@ class AlertsConnector:
             f"{self._base_url}/alerts",
             headers={"X-API-Key": self._api_key},
         )
-        response.raise_for_status()
+        try:
+            response.raise_for_status()
+        except HTTPStatusError as error:
+            if error.response.status_code == 401:
+                raise ConnectorAuthenticationError(
+                    "Connector authentication failed",
+                ) from error
+
+            raise
 
         return AlertCollection.model_validate(response.json())
