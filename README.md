@@ -53,6 +53,35 @@ curl \
 
 The fixed API key is intended only for this educational mock API.
 
+## Using the alerts connector
+
+With the mock API running, the connector can retrieve and parse its alerts:
+
+```python
+import asyncio
+
+from httpx import AsyncClient
+
+from connector_lab.client.alerts_connector import AlertsConnector
+
+
+async def main() -> None:
+    async with AsyncClient(timeout=5.0) as http_client:
+        connector = AlertsConnector(
+            base_url="http://127.0.0.1:8000",
+            api_key="connector-lab-secret",
+            http_client=http_client,
+        )
+
+        alerts = await connector.list_alerts()
+
+    for alert in alerts.items:
+        print(alert.id, alert.severity, alert.title)
+
+
+asyncio.run(main())
+```
+
 ## Quality checks
 
 ```bash
