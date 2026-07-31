@@ -22,6 +22,37 @@ concepts are studied.
 uv sync
 ```
 
+## Running the mock API
+
+Start the development server:
+
+```bash
+uv run uvicorn connector_lab.mock_api.app:app \
+  --host 127.0.0.1 \
+  --port 8000 \
+  --reload
+```
+
+The interactive API documentation is available at:
+
+- <http://127.0.0.1:8000/docs>
+
+Check the service health:
+
+```bash
+curl http://127.0.0.1:8000/health
+```
+
+Retrieve sample alerts:
+
+```bash
+curl \
+  -H "X-API-Key: connector-lab-secret" \
+  http://127.0.0.1:8000/alerts
+```
+
+The fixed API key is intended only for this educational mock API.
+
 ## Quality checks
 
 ```bash
