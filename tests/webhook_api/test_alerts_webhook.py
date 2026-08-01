@@ -1,6 +1,7 @@
 import hashlib
 import hmac
 import json
+from datetime import UTC, datetime
 
 import pytest
 from httpx import ASGITransport, AsyncClient
@@ -10,10 +11,18 @@ from connector_lab.webhook_api.app import app
 WEBHOOK_SECRET = "connector-lab-webhook-secret"
 
 
-def sign_payload(payload: bytes) -> str:
+def current_timestamp() -> str:
+    return str(int(datetime.now(UTC).timestamp()))
+
+
+def sign_payload(
+    payload: bytes,
+    timestamp: str,
+) -> str:
+    signed_content = timestamp.encode() + b"." + payload
     digest = hmac.new(
         WEBHOOK_SECRET.encode(),
-        payload,
+        signed_content,
         hashlib.sha256,
     ).hexdigest()
 
@@ -22,6 +31,7 @@ def sign_payload(payload: bytes) -> str:
 
 @pytest.mark.asyncio
 async def test_signed_alert_event_is_accepted() -> None:
+    timestamp = current_timestamp()
     payload = json.dumps(
         {
             "event_id": "event-001",
@@ -48,7 +58,11 @@ async def test_signed_alert_event_is_accepted() -> None:
             content=payload,
             headers={
                 "Content-Type": "application/json",
-                "X-Webhook-Signature": sign_payload(payload),
+                "X-Webhook-Timestamp": timestamp,
+                "X-Webhook-Signature": sign_payload(
+                    payload,
+                    timestamp,
+                ),
             },
         )
 
@@ -70,9 +84,11 @@ async def test_signed_alert_event_is_accepted() -> None:
 async def test_unsigned_or_invalid_webhook_is_rejected(
     signature: str | None,
 ) -> None:
+    timestamp = current_timestamp()
     payload = b"{}"
     headers = {
         "Content-Type": "application/json",
+        "X-Webhook-Timestamp": timestamp,
     }
 
     if signature is not None:
@@ -98,6 +114,7 @@ async def test_unsigned_or_invalid_webhook_is_rejected(
 
 @pytest.mark.asyncio
 async def test_signed_invalid_payload_is_rejected() -> None:
+    timestamp = current_timestamp()
     payload = b"{}"
     transport = ASGITransport(
         app=app,
@@ -113,9 +130,57 @@ async def test_signed_invalid_payload_is_rejected() -> None:
             content=payload,
             headers={
                 "Content-Type": "application/json",
-                "X-Webhook-Signature": sign_payload(payload),
+                "X-Webhook-Timestamp": timestamp,
+                "X-Webhook-Signature": sign_payload(
+                    payload,
+                    timestamp,
+                ),
             },
         )
 
     assert response.status_code == 422
     assert "detail" in response.json()
+
+
+@pytest.mark.asyncio
+async def test_current_timestamped_event_is_accepted() -> None:
+    timestamp = current_timestamp()
+    payload = json.dumps(
+        {
+            "event_id": "event-timestamped",
+            "event_type": "alert.detected",
+            "alert": {
+                "id": "alert-timestamped",
+                "title": "Timestamped alert",
+                "severity": "medium",
+                "status": "open",
+                "detected_at": "2026-08-01T12:00:00Z",
+            },
+        },
+        separators=(",", ":"),
+    ).encode()
+
+    transport = ASGITransport(app=app)
+
+    async with AsyncClient(
+        transport=transport,
+        base_url="http://test",
+    ) as client:
+        response = await client.post(
+            "/webhooks/alerts",
+            content=payload,
+            headers={
+                "Content-Type": "application/json",
+                "X-Webhook-Timestamp": timestamp,
+                "X-Webhook-Signature": sign_payload(
+                    payload,
+                    timestamp,
+                ),
+            },
+        )
+
+    assert response.status_code == 202
+    assert response.json() == {
+        "event_id": "event-timestamped",
+        "status": "accepted",
+    }

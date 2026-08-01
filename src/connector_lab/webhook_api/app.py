@@ -27,12 +27,17 @@ async def receive_alert_webhook(
         str | None,
         Header(alias="X-Webhook-Signature"),
     ] = None,
+    webhook_timestamp: Annotated[
+        str | None,
+        Header(alias="X-Webhook-Timestamp"),
+    ] = None,
 ) -> WebhookAcceptedResponse:
     payload = await request.body()
 
     verify_signature(
         payload=payload,
         provided_signature=webhook_signature,
+        provided_timestamp=webhook_timestamp,
     )
 
     try:
