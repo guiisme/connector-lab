@@ -248,3 +248,126 @@ async def test_timestamp_outside_tolerance_is_rejected(
     assert response.json() == {
         "detail": "Invalid webhook timestamp",
     }
+
+
+@pytest.mark.asyncio
+async def test_repeated_event_id_returns_duplicate_status() -> None:
+    fixed_now = datetime(
+        2026,
+        8,
+        1,
+        12,
+        0,
+        tzinfo=UTC,
+    )
+    timestamp = str(int(fixed_now.timestamp()))
+    payload = json.dumps(
+        {
+            "event_id": "event-duplicate",
+            "event_type": "alert.detected",
+            "alert": {
+                "id": "alert-duplicate",
+                "title": "Repeated webhook delivery",
+                "severity": "medium",
+                "status": "open",
+                "detected_at": "2026-08-01T11:59:00Z",
+            },
+        },
+        separators=(",", ":"),
+    ).encode()
+    headers = {
+        "Content-Type": "application/json",
+        "X-Webhook-Timestamp": timestamp,
+        "X-Webhook-Signature": sign_payload(
+            payload,
+            timestamp,
+        ),
+    }
+
+    test_app = create_app(
+        now_provider=lambda: fixed_now,
+    )
+    transport = ASGITransport(app=test_app)
+
+    async with AsyncClient(
+        transport=transport,
+        base_url="http://test",
+    ) as client:
+        first_response = await client.post(
+            "/webhooks/alerts",
+            content=payload,
+            headers=headers,
+        )
+        second_response = await client.post(
+            "/webhooks/alerts",
+            content=payload,
+            headers=headers,
+        )
+
+    assert first_response.status_code == 202
+    assert first_response.json() == {
+        "event_id": "event-duplicate",
+        "status": "accepted",
+    }
+
+    assert second_response.status_code == 202
+    assert second_response.json() == {
+        "event_id": "event-duplicate",
+        "status": "duplicate",
+    }
+
+
+@pytest.mark.asyncio
+async def test_app_instances_have_independent_event_stores() -> None:
+    fixed_now = datetime(
+        2026,
+        8,
+        1,
+        12,
+        0,
+        tzinfo=UTC,
+    )
+    timestamp = str(int(fixed_now.timestamp()))
+    payload = json.dumps(
+        {
+            "event_id": "event-isolated",
+            "event_type": "alert.detected",
+            "alert": {
+                "id": "alert-isolated",
+                "title": "Isolated application event",
+                "severity": "low",
+                "status": "open",
+                "detected_at": "2026-08-01T11:59:00Z",
+            },
+        },
+        separators=(",", ":"),
+    ).encode()
+    headers = {
+        "Content-Type": "application/json",
+        "X-Webhook-Timestamp": timestamp,
+        "X-Webhook-Signature": sign_payload(
+            payload,
+            timestamp,
+        ),
+    }
+    statuses: list[str] = []
+
+    for test_app in (
+        create_app(now_provider=lambda: fixed_now),
+        create_app(now_provider=lambda: fixed_now),
+    ):
+        transport = ASGITransport(app=test_app)
+
+        async with AsyncClient(
+            transport=transport,
+            base_url="http://test",
+        ) as client:
+            response = await client.post(
+                "/webhooks/alerts",
+                content=payload,
+                headers=headers,
+            )
+
+        statuses.append(response.json()["status"])
+
+    assert statuses == ["accepted", "accepted"]

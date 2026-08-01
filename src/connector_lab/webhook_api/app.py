@@ -23,6 +23,8 @@ def create_app(
     *,
     now_provider: NowProvider = utc_now,
 ) -> FastAPI:
+    processed_event_ids: set[str] = set()
+
     api = FastAPI(
         title="Connector Lab Webhook API",
         description="Secure webhook receiver for integration studies.",
@@ -60,6 +62,14 @@ def create_app(
                 error.errors(),
                 body=payload,
             ) from error
+
+        if event.event_id in processed_event_ids:
+            return WebhookAcceptedResponse(
+                event_id=event.event_id,
+                status="duplicate",
+            )
+
+        processed_event_ids.add(event.event_id)
 
         return WebhookAcceptedResponse(
             event_id=event.event_id,
