@@ -1,12 +1,12 @@
 import hashlib
 import hmac
 import json
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
 import pytest
 from httpx import ASGITransport, AsyncClient
 
-from connector_lab.webhook_api.app import app
+from connector_lab.webhook_api.app import app, create_app
 
 WEBHOOK_SECRET = "connector-lab-webhook-secret"
 
@@ -183,4 +183,68 @@ async def test_current_timestamped_event_is_accepted() -> None:
     assert response.json() == {
         "event_id": "event-timestamped",
         "status": "accepted",
+    }
+
+
+@pytest.mark.parametrize(
+    "timestamp_offset",
+    [
+        timedelta(seconds=-301),
+        timedelta(seconds=301),
+    ],
+)
+@pytest.mark.asyncio
+async def test_timestamp_outside_tolerance_is_rejected(
+    timestamp_offset: timedelta,
+) -> None:
+    fixed_now = datetime(
+        2026,
+        8,
+        1,
+        12,
+        0,
+        tzinfo=UTC,
+    )
+    delivery_time = fixed_now + timestamp_offset
+    timestamp = str(int(delivery_time.timestamp()))
+    payload = json.dumps(
+        {
+            "event_id": "event-replayed",
+            "event_type": "alert.detected",
+            "alert": {
+                "id": "alert-replayed",
+                "title": "Replayed alert",
+                "severity": "high",
+                "status": "open",
+                "detected_at": "2026-08-01T11:59:00Z",
+            },
+        },
+        separators=(",", ":"),
+    ).encode()
+
+    test_app = create_app(
+        now_provider=lambda: fixed_now,
+    )
+    transport = ASGITransport(app=test_app)
+
+    async with AsyncClient(
+        transport=transport,
+        base_url="http://test",
+    ) as client:
+        response = await client.post(
+            "/webhooks/alerts",
+            content=payload,
+            headers={
+                "Content-Type": "application/json",
+                "X-Webhook-Timestamp": timestamp,
+                "X-Webhook-Signature": sign_payload(
+                    payload,
+                    timestamp,
+                ),
+            },
+        )
+
+    assert response.status_code == 401
+    assert response.json() == {
+        "detail": "Invalid webhook timestamp",
     }
