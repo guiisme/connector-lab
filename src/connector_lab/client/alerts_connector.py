@@ -32,6 +32,8 @@ class AlertsConnector:
     async def list_alerts(self) -> AlertCollection:
         alerts: list[Alert] = []
         page_number = 1
+        seen_alert_ids: set[str] = set()
+        reported_total: int | None = None
 
         while True:
             response = await self._http_client.get(
@@ -59,11 +61,31 @@ class AlertsConnector:
                     "Unexpected page number",
                 )
 
+            if reported_total is None:
+                reported_total = alert_page.total
+            elif alert_page.total != reported_total:
+                raise ConnectorPaginationError(
+                    "Reported total changed between pages",
+                )
+
             if alert_page.has_next and not alert_page.items:
                 raise ConnectorPaginationError(
                     "Empty page cannot have a next page",
                 )
-            alerts.extend(alert_page.items)
+
+            for alert in alert_page.items:
+                if alert.id in seen_alert_ids:
+                    raise ConnectorPaginationError(
+                        "Duplicate alert received",
+                    )
+
+                seen_alert_ids.add(alert.id)
+                alerts.append(alert)
+
+            if alert_page.has_next and len(alerts) >= reported_total:
+                raise ConnectorPaginationError(
+                    "Next page exceeds reported total",
+                )
 
             if not alert_page.has_next:
                 break

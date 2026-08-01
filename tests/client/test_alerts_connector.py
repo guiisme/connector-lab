@@ -250,3 +250,83 @@ async def test_connector_rejects_invalid_page_size(
                 http_client=http_client,
                 page_size=page_size,
             )
+
+
+@pytest.mark.asyncio
+async def test_list_alerts_rejects_duplicate_alerts() -> None:
+    def handle_duplicate_alert(request: Request) -> Response:
+        page = int(request.url.params["page"])
+
+        return Response(
+            status_code=200,
+            json={
+                "items": [
+                    {
+                        "id": "alert-001",
+                        "title": "Repeated alert",
+                        "severity": "medium",
+                        "status": "open",
+                        "detected_at": "2026-07-31T18:00:00Z",
+                    }
+                ],
+                "page": page,
+                "page_size": 100,
+                "total": 2,
+                "has_next": page == 1,
+            },
+        )
+
+    transport = MockTransport(handle_duplicate_alert)
+
+    async with AsyncClient(transport=transport) as http_client:
+        connector = AlertsConnector(
+            base_url="https://mock-cyber.local",
+            api_key="connector-lab-secret",
+            http_client=http_client,
+        )
+
+        with pytest.raises(
+            ConnectorPaginationError,
+            match="Duplicate alert received",
+        ):
+            await connector.list_alerts()
+
+
+@pytest.mark.asyncio
+async def test_list_alerts_rejects_next_page_after_total_is_reached() -> None:
+    def handle_invalid_next_page(request: Request) -> Response:
+        page = int(request.url.params["page"])
+
+        return Response(
+            status_code=200,
+            json={
+                "items": [
+                    {
+                        "id": f"alert-{page:03}",
+                        "title": "Pagination limit alert",
+                        "severity": "medium",
+                        "status": "open",
+                        "detected_at": "2026-07-31T18:00:00Z",
+                    }
+                ],
+                "page": page,
+                "page_size": 100,
+                "total": 1,
+                "has_next": page == 1,
+            },
+        )
+
+    transport = MockTransport(handle_invalid_next_page)
+
+    async with AsyncClient(transport=transport) as http_client:
+        connector = AlertsConnector(
+            base_url="https://mock-cyber.local",
+            api_key="connector-lab-secret",
+            http_client=http_client,
+        )
+
+        with pytest.raises(
+            ConnectorPaginationError,
+            match="Next page exceeds reported total",
+        ):
+            await connector.list_alerts()
