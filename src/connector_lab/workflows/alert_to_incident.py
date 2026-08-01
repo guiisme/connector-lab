@@ -30,11 +30,21 @@ class AlertToIncidentWorkflow:
         incident_creator: IncidentCreator,
     ) -> None:
         self._incident_creator = incident_creator
+        self._correlations: dict[str, str] = {}
 
     async def process(
         self,
         alert: Alert,
     ) -> AlertIncidentResult:
+        existing_incident_id = self._correlations.get(alert.id)
+
+        if existing_incident_id is not None:
+            return AlertIncidentResult(
+                alert_id=alert.id,
+                incident_id=existing_incident_id,
+                created=False,
+            )
+
         request = IncidentCreateRequest(
             external_reference=alert.id,
             title=alert.title,
@@ -45,6 +55,8 @@ class AlertToIncidentWorkflow:
         incident = await self._incident_creator.create_incident(
             request,
         )
+
+        self._correlations[alert.id] = incident.incident_id
 
         return AlertIncidentResult(
             alert_id=alert.id,

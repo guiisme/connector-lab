@@ -68,3 +68,35 @@ async def test_new_alert_creates_mapped_incident() -> None:
     assert result.alert_id == "alert-001"
     assert result.incident_id == "INC-0001"
     assert result.created is True
+
+
+@pytest.mark.asyncio
+async def test_reprocessed_alert_returns_existing_correlation() -> None:
+    incident_creator = FakeIncidentCreator()
+    workflow = AlertToIncidentWorkflow(
+        incident_creator=incident_creator,
+    )
+    alert = Alert(
+        id="alert-001",
+        title="Suspicious PowerShell execution",
+        severity=AlertSeverity.HIGH,
+        status=AlertStatus.OPEN,
+        detected_at=datetime(
+            2026,
+            7,
+            31,
+            18,
+            0,
+            tzinfo=UTC,
+        ),
+    )
+
+    first_result = await workflow.process(alert)
+    second_result = await workflow.process(alert)
+
+    assert len(incident_creator.requests) == 1
+
+    assert first_result.alert_id == second_result.alert_id
+    assert first_result.incident_id == second_result.incident_id
+    assert first_result.created is True
+    assert second_result.created is False
