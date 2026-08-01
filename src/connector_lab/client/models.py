@@ -24,6 +24,14 @@ class Alert(BaseModel):
     detected_at: datetime
 
 
+class AlertPage(BaseModel):
+    items: list[Alert]
+    page: int
+    page_size: int
+    total: int
+    has_next: bool
+
+
 class AlertCollection(BaseModel):
     items: list[Alert]
     total: int
