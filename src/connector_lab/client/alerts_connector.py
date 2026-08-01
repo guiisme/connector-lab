@@ -1,8 +1,15 @@
-from httpx import AsyncClient, HTTPStatusError
+from httpx import (
+    AsyncClient,
+    ConnectError,
+    HTTPStatusError,
+    TimeoutException,
+)
 
 from connector_lab.client.errors import (
     ConnectorAuthenticationError,
+    ConnectorConnectionError,
     ConnectorPaginationError,
+    ConnectorTimeoutError,
 )
 from connector_lab.client.models import (
     Alert,
@@ -36,14 +43,23 @@ class AlertsConnector:
         reported_total: int | None = None
 
         while True:
-            response = await self._http_client.get(
-                f"{self._base_url}/alerts",
-                headers={"X-API-Key": self._api_key},
-                params={
-                    "page": page_number,
-                    "page_size": self._page_size,
-                },
-            )
+            try:
+                response = await self._http_client.get(
+                    f"{self._base_url}/alerts",
+                    headers={"X-API-Key": self._api_key},
+                    params={
+                        "page": page_number,
+                        "page_size": self._page_size,
+                    },
+                )
+            except TimeoutException as error:
+                raise ConnectorTimeoutError(
+                    "Connector request timed out",
+                ) from error
+            except ConnectError as error:
+                raise ConnectorConnectionError(
+                    "Connector could not reach the external API",
+                ) from error
 
             try:
                 response.raise_for_status()

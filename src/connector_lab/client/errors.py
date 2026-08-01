@@ -4,3 +4,11 @@ class ConnectorAuthenticationError(Exception):
 
 class ConnectorPaginationError(Exception):
     """Raised when pagination metadata is inconsistent."""
+
+
+class ConnectorTimeoutError(Exception):
+    """Raised when the external API does not respond within the timeout."""
+
+
+class ConnectorConnectionError(Exception):
+    """Raised when the connector cannot reach the external API."""

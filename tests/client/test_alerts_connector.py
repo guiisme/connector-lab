@@ -1,10 +1,19 @@
 import pytest
-from httpx import AsyncClient, MockTransport, Request, Response
+from httpx import (
+    AsyncClient,
+    ConnectError,
+    MockTransport,
+    ReadTimeout,
+    Request,
+    Response,
+)
 
 from connector_lab.client.alerts_connector import AlertsConnector
 from connector_lab.client.errors import (
     ConnectorAuthenticationError,
+    ConnectorConnectionError,
     ConnectorPaginationError,
+    ConnectorTimeoutError,
 )
 from connector_lab.client.models import Alert, AlertSeverity
 
@@ -328,5 +337,53 @@ async def test_list_alerts_rejects_next_page_after_total_is_reached() -> None:
         with pytest.raises(
             ConnectorPaginationError,
             match="Next page exceeds reported total",
+        ):
+            await connector.list_alerts()
+
+
+@pytest.mark.asyncio
+async def test_list_alerts_maps_timeout_error() -> None:
+    def handle_timeout(request: Request) -> Response:
+        raise ReadTimeout(
+            "External API timed out",
+            request=request,
+        )
+
+    transport = MockTransport(handle_timeout)
+
+    async with AsyncClient(transport=transport) as http_client:
+        connector = AlertsConnector(
+            base_url="https://mock-cyber.local",
+            api_key="connector-lab-secret",
+            http_client=http_client,
+        )
+
+        with pytest.raises(
+            ConnectorTimeoutError,
+            match="Connector request timed out",
+        ):
+            await connector.list_alerts()
+
+
+@pytest.mark.asyncio
+async def test_list_alerts_maps_connection_error() -> None:
+    def handle_connection_error(request: Request) -> Response:
+        raise ConnectError(
+            "External API is unavailable",
+            request=request,
+        )
+
+    transport = MockTransport(handle_connection_error)
+
+    async with AsyncClient(transport=transport) as http_client:
+        connector = AlertsConnector(
+            base_url="https://mock-cyber.local",
+            api_key="connector-lab-secret",
+            http_client=http_client,
+        )
+
+        with pytest.raises(
+            ConnectorConnectionError,
+            match="Connector could not reach the external API",
         ):
             await connector.list_alerts()
