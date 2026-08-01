@@ -57,3 +57,40 @@ async def test_signed_alert_event_is_accepted() -> None:
         "event_id": "event-001",
         "status": "accepted",
     }
+
+
+@pytest.mark.parametrize(
+    "signature",
+    [
+        None,
+        "sha256=invalid",
+    ],
+)
+@pytest.mark.asyncio
+async def test_unsigned_or_invalid_webhook_is_rejected(
+    signature: str | None,
+) -> None:
+    payload = b"{}"
+    headers = {
+        "Content-Type": "application/json",
+    }
+
+    if signature is not None:
+        headers["X-Webhook-Signature"] = signature
+
+    transport = ASGITransport(app=app)
+
+    async with AsyncClient(
+        transport=transport,
+        base_url="http://test",
+    ) as client:
+        response = await client.post(
+            "/webhooks/alerts",
+            content=payload,
+            headers=headers,
+        )
+
+    assert response.status_code == 401
+    assert response.json() == {
+        "detail": "Invalid webhook signature",
+    }
