@@ -13,6 +13,7 @@ from connector_lab.client.errors import (
     ConnectorAuthenticationError,
     ConnectorConnectionError,
     ConnectorPaginationError,
+    ConnectorRateLimitError,
     ConnectorTimeoutError,
 )
 from connector_lab.client.models import Alert, AlertSeverity
@@ -387,3 +388,125 @@ async def test_list_alerts_maps_connection_error() -> None:
             match="Connector could not reach the external API",
         ):
             await connector.list_alerts()
+
+
+@pytest.mark.asyncio
+async def test_list_alerts_retries_rate_limit_until_success() -> None:
+    attempts = 0
+    delays: list[float] = []
+
+    async def fake_sleep(delay: float) -> None:
+        delays.append(delay)
+
+    def handle_rate_limit_then_success(request: Request) -> Response:
+        nonlocal attempts
+        attempts += 1
+
+        if attempts <= 2:
+            return Response(
+                status_code=429,
+                json={"detail": "Rate limit exceeded"},
+            )
+
+        return Response(
+            status_code=200,
+            json={
+                "items": [],
+                "page": 1,
+                "page_size": 100,
+                "total": 0,
+                "has_next": False,
+            },
+        )
+
+    transport = MockTransport(handle_rate_limit_then_success)
+
+    async with AsyncClient(transport=transport) as http_client:
+        connector = AlertsConnector(
+            base_url="https://mock-cyber.local",
+            api_key="connector-lab-secret",
+            http_client=http_client,
+            max_retries=2,
+            backoff_seconds=0.5,
+            sleep_func=fake_sleep,
+        )
+
+        result = await connector.list_alerts()
+
+    assert result.items == []
+    assert attempts == 3
+    assert delays == [0.5, 1.0]
+
+
+@pytest.mark.asyncio
+async def test_list_alerts_raises_when_rate_limit_retries_are_exhausted() -> None:
+    attempts = 0
+    delays: list[float] = []
+
+    async def fake_sleep(delay: float) -> None:
+        delays.append(delay)
+
+    def handle_rate_limit(request: Request) -> Response:
+        nonlocal attempts
+        attempts += 1
+
+        return Response(
+            status_code=429,
+            json={"detail": "Rate limit exceeded"},
+        )
+
+    transport = MockTransport(handle_rate_limit)
+
+    async with AsyncClient(transport=transport) as http_client:
+        connector = AlertsConnector(
+            base_url="https://mock-cyber.local",
+            api_key="connector-lab-secret",
+            http_client=http_client,
+            max_retries=2,
+            backoff_seconds=0.25,
+            sleep_func=fake_sleep,
+        )
+
+        with pytest.raises(
+            ConnectorRateLimitError,
+            match="Connector rate limit retries exhausted",
+        ):
+            await connector.list_alerts()
+
+    assert attempts == 3
+    assert delays == [0.25, 0.5]
+
+
+@pytest.mark.asyncio
+async def test_list_alerts_does_not_retry_authentication_failure() -> None:
+    attempts = 0
+    delays: list[float] = []
+
+    async def fake_sleep(delay: float) -> None:
+        delays.append(delay)
+
+    def handle_authentication_failure(request: Request) -> Response:
+        nonlocal attempts
+        attempts += 1
+
+        return Response(
+            status_code=401,
+            json={"detail": "Invalid API key"},
+        )
+
+    transport = MockTransport(handle_authentication_failure)
+
+    async with AsyncClient(transport=transport) as http_client:
+        connector = AlertsConnector(
+            base_url="https://mock-cyber.local",
+            api_key="invalid-key",
+            http_client=http_client,
+            max_retries=3,
+            sleep_func=fake_sleep,
+        )
+
+        with pytest.raises(ConnectorAuthenticationError):
+            await connector.list_alerts()
+
+    assert attempts == 1
+    assert delays == []

@@ -12,3 +12,7 @@ class ConnectorTimeoutError(Exception):
 
 class ConnectorConnectionError(Exception):
     """Raised when the connector cannot reach the external API."""
+
+
+class ConnectorRateLimitError(Exception):
+    """Raised when rate-limit retries are exhausted."""
