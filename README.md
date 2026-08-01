@@ -43,13 +43,21 @@ Check the service health:
 curl http://127.0.0.1:8000/health
 ```
 
-Retrieve sample alerts:
+Retrieve a page of sample alerts:
 
 ```bash
 curl \
   -H "X-API-Key: connector-lab-secret" \
-  http://127.0.0.1:8000/alerts
+  "http://127.0.0.1:8000/alerts?page=1&page_size=1"
 ```
+
+Pagination parameters:
+
+- `page`: page number starting at `1`; default is `1`
+- `page_size`: items per page from `1` to `100`; default is `50`
+
+The response includes `page`, `page_size`, `total`, and `has_next`
+alongside the alert items.
 
 The fixed API key is intended only for this educational mock API.
 
