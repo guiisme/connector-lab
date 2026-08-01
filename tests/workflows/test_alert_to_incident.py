@@ -5,6 +5,7 @@ import pytest
 from connector_lab.client.itsm_models import (
     IncidentCreateRequest,
     IncidentCreateResponse,
+    IncidentPriority,
     IncidentStatus,
 )
 from connector_lab.client.models import (
@@ -100,3 +101,42 @@ async def test_reprocessed_alert_returns_existing_correlation() -> None:
     assert first_result.incident_id == second_result.incident_id
     assert first_result.created is True
     assert second_result.created is False
+
+
+@pytest.mark.parametrize(
+    ("severity", "expected_priority"),
+    [
+        (AlertSeverity.LOW, IncidentPriority.LOW),
+        (AlertSeverity.MEDIUM, IncidentPriority.MEDIUM),
+        (AlertSeverity.HIGH, IncidentPriority.HIGH),
+        (AlertSeverity.CRITICAL, IncidentPriority.CRITICAL),
+    ],
+)
+@pytest.mark.asyncio
+async def test_alert_severity_maps_to_incident_priority(
+    severity: AlertSeverity,
+    expected_priority: IncidentPriority,
+) -> None:
+    incident_creator = FakeIncidentCreator()
+    workflow = AlertToIncidentWorkflow(
+        incident_creator=incident_creator,
+    )
+    alert = Alert(
+        id=f"alert-{severity.value}",
+        title=f"{severity.value.title()} severity alert",
+        severity=severity,
+        status=AlertStatus.OPEN,
+        detected_at=datetime(
+            2026,
+            7,
+            31,
+            18,
+            0,
+            tzinfo=UTC,
+        ),
+    )
+
+    await workflow.process(alert)
+
+    assert len(incident_creator.requests) == 1
+    assert incident_creator.requests[0].priority is expected_priority
