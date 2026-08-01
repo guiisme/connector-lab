@@ -26,4 +26,7 @@ class Alert(BaseModel):
 
 class AlertCollection(BaseModel):
     items: list[Alert]
+    page: int
+    page_size: int
     total: int
+    has_next: bool

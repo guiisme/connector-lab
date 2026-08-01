@@ -1,7 +1,7 @@
 from datetime import UTC, datetime
 from typing import Annotated
 
-from fastapi import Depends, FastAPI
+from fastapi import Depends, FastAPI, Query
 
 from connector_lab.mock_api.auth import require_api_key
 from connector_lab.mock_api.models import (
@@ -42,8 +42,18 @@ def get_health() -> dict[str, str]:
 @app.get("/alerts", response_model=AlertCollection)
 def get_alerts(
     _: Annotated[None, Depends(require_api_key)],
+    page: Annotated[int, Query(ge=1)] = 1,
+    page_size: Annotated[int, Query(ge=1, le=100)] = 50,
 ) -> AlertCollection:
+    total = len(SAMPLE_ALERTS)
+    start = (page - 1) * page_size
+    end = start + page_size
+    items = SAMPLE_ALERTS[start:end]
+
     return AlertCollection(
-        items=SAMPLE_ALERTS,
-        total=len(SAMPLE_ALERTS),
+        items=items,
+        page=page,
+        page_size=page_size,
+        total=total,
+        has_next=end < total,
     )
