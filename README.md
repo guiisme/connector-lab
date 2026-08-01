@@ -61,6 +61,41 @@ alongside the alert items.
 
 The fixed API key is intended only for this educational mock API.
 
+## Running the mock ITSM API
+
+Start the ITSM development server:
+
+```bash
+uv run uvicorn connector_lab.mock_itsm_api.app:app \
+  --host 127.0.0.1 \
+  --port 8001
+```
+
+The interactive API documentation is available at:
+
+- <http://127.0.0.1:8001/docs>
+
+Create a simulated incident:
+
+```bash
+curl \
+  -X POST \
+  -H "X-API-Key: connector-lab-itsm-secret" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "external_reference": "alert-001",
+    "title": "Suspicious PowerShell execution",
+    "description": "Created from cybersecurity alert alert-001",
+    "priority": "high"
+  }' \
+  http://127.0.0.1:8001/incidents
+```
+
+Incident identifiers are sequential within each API process. Data is not
+persisted after the process stops.
+
+The fixed API key is intended only for this educational mock API.
+
 ## Using the alerts connector
 
 With the mock API running, the connector can retrieve and parse its alerts:
