@@ -79,6 +79,7 @@ async def main() -> None:
             base_url="http://127.0.0.1:8000",
             api_key="connector-lab-secret",
             http_client=http_client,
+            page_size=1,
         )
 
         alerts = await connector.list_alerts()
@@ -89,6 +90,11 @@ async def main() -> None:
 
 asyncio.run(main())
 ```
+The connector follows `has_next` automatically and returns a single
+consolidated collection. Consumers do not need to manage page numbers.
+
+`page_size` is optional, defaults to `100`, and accepts values from `1` to
+`100`.
 
 ## Quality checks
 
