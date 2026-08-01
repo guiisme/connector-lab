@@ -510,3 +510,27 @@ async def test_list_alerts_does_not_retry_authentication_failure() -> None:
 
     assert attempts == 1
     assert delays == []
+
+
+@pytest.mark.parametrize(
+    ("max_retries", "backoff_seconds", "message"),
+    [
+        (-1, 1.0, "max_retries must be zero or greater"),
+        (2, -0.1, "backoff_seconds must be zero or greater"),
+    ],
+)
+@pytest.mark.asyncio
+async def test_connector_rejects_invalid_retry_configuration(
+    max_retries: int,
+    backoff_seconds: float,
+    message: str,
+) -> None:
+    async with AsyncClient() as http_client:
+        with pytest.raises(ValueError, match=message):
+            AlertsConnector(
+                base_url="https://mock-cyber.local",
+                api_key="connector-lab-secret",
+                http_client=http_client,
+                max_retries=max_retries,
+                backoff_seconds=backoff_seconds,
+            )

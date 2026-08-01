@@ -46,6 +46,15 @@ class AlertsConnector:
         self._http_client = http_client
         if not 1 <= page_size <= 100:
             raise ValueError("page_size must be between 1 and 100")
+        if max_retries < 0:
+            raise ValueError(
+                "max_retries must be zero or greater",
+            )
+
+        if backoff_seconds < 0:
+            raise ValueError(
+                "backoff_seconds must be zero or greater",
+            )
         self._page_size = page_size
         self._max_retries = max_retries
         self._backoff_seconds = backoff_seconds
