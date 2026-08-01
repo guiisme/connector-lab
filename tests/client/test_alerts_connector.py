@@ -83,10 +83,12 @@ async def test_list_alerts_raises_connector_authentication_error() -> None:
 @pytest.mark.asyncio
 async def test_list_alerts_retrieves_all_pages() -> None:
     requested_pages: list[int] = []
+    requested_page_sizes: list[int] = []
 
     def handle_paginated_request(request: Request) -> Response:
         page = int(request.url.params.get("page", "1"))
         page_size = int(request.url.params.get("page_size", "100"))
+        requested_page_sizes.append(page_size)
 
         requested_pages.append(page)
 
@@ -116,6 +118,7 @@ async def test_list_alerts_retrieves_all_pages() -> None:
             base_url="https://mock-cyber.local",
             api_key="connector-lab-secret",
             http_client=http_client,
+            page_size=1,
         )
 
         result = await connector.list_alerts()
@@ -127,6 +130,7 @@ async def test_list_alerts_retrieves_all_pages() -> None:
         "alert-003",
     ]
     assert result.total == 3
+    assert requested_page_sizes == [1, 1, 1]
 
 
 @pytest.mark.asyncio
@@ -228,3 +232,21 @@ async def test_list_alerts_rejects_unexpected_page_number() -> None:
             match="Unexpected page number",
         ):
             await connector.list_alerts()
+
+
+@pytest.mark.parametrize("page_size", [0, 101])
+@pytest.mark.asyncio
+async def test_connector_rejects_invalid_page_size(
+    page_size: int,
+) -> None:
+    async with AsyncClient() as http_client:
+        with pytest.raises(
+            ValueError,
+            match="page_size must be between 1 and 100",
+        ):
+            AlertsConnector(
+                base_url="https://mock-cyber.local",
+                api_key="connector-lab-secret",
+                http_client=http_client,
+                page_size=page_size,
+            )

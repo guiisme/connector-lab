@@ -20,10 +20,14 @@ class AlertsConnector:
         base_url: str,
         api_key: str,
         http_client: AsyncClient,
+        page_size: int = DEFAULT_PAGE_SIZE,
     ) -> None:
         self._base_url = base_url.rstrip("/")
         self._api_key = api_key
         self._http_client = http_client
+        if not 1 <= page_size <= 100:
+            raise ValueError("page_size must be between 1 and 100")
+        self._page_size = page_size
 
     async def list_alerts(self) -> AlertCollection:
         alerts: list[Alert] = []
@@ -35,7 +39,7 @@ class AlertsConnector:
                 headers={"X-API-Key": self._api_key},
                 params={
                     "page": page_number,
-                    "page_size": DEFAULT_PAGE_SIZE,
+                    "page_size": self._page_size,
                 },
             )
 
