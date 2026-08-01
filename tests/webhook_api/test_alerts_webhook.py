@@ -371,3 +371,46 @@ async def test_app_instances_have_independent_event_stores() -> None:
         statuses.append(response.json()["status"])
 
     assert statuses == ["accepted", "accepted"]
+
+
+@pytest.mark.parametrize(
+    ("timestamp", "expected_detail"),
+    [
+        (None, "Invalid webhook signature"),
+        ("not-a-timestamp", "Invalid webhook timestamp"),
+    ],
+)
+@pytest.mark.asyncio
+async def test_missing_or_malformed_timestamp_is_rejected(
+    timestamp: str | None,
+    expected_detail: str,
+) -> None:
+    payload = b"{}"
+    timestamp_for_signature = timestamp or ""
+    headers = {
+        "Content-Type": "application/json",
+        "X-Webhook-Signature": sign_payload(
+            payload,
+            timestamp_for_signature,
+        ),
+    }
+
+    if timestamp is not None:
+        headers["X-Webhook-Timestamp"] = timestamp
+
+    transport = ASGITransport(app=app)
+
+    async with AsyncClient(
+        transport=transport,
+        base_url="http://test",
+    ) as client:
+        response = await client.post(
+            "/webhooks/alerts",
+            content=payload,
+            headers=headers,
+        )
+
+    assert response.status_code == 401
+    assert response.json() == {
+        "detail": expected_detail,
+    }
