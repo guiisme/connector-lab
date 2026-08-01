@@ -96,6 +96,20 @@ consolidated collection. Consumers do not need to manage page numbers.
 `page_size` is optional, defaults to `100`, and accepts values from `1` to
 `100`.
 
+## Connector resilience
+
+The connector retries only responses with status `429 Too Many Requests`.
+
+Default retry behavior:
+
+- `max_retries=2`: two retries after the initial request
+- `backoff_seconds=1.0`: exponential delays of 1 and 2 seconds
+- authentication and other permanent HTTP errors are not retried
+- timeout and connection failures are reported immediately
+
+The connector exposes specific errors for authentication, timeouts, connection
+failures, exhausted rate limits, and inconsistent pagination.
+
 ## Quality checks
 
 ```bash
