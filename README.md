@@ -212,6 +212,44 @@ returns the stored correlation with `created=False`.
 Correlations exist only in memory. Restarting the process or creating another
 workflow instance clears the idempotency state.
 
+## Running the alerts webhook receiver
+
+Start the webhook API:
+
+```bash
+uv run uvicorn connector_lab.webhook_api.app:app \
+  --host 127.0.0.1 \
+  --port 8002
+```
+
+The interactive API documentation is available at:
+
+- <http://127.0.0.1:8002/docs>
+
+Alert events are received through:
+
+```text
+POST /webhooks/alerts
+```
+
+Requests must include an `X-Webhook-Signature` header in this format:
+
+```text
+sha256=<hexadecimal HMAC digest>
+```
+
+The digest is calculated with HMAC-SHA256 over the exact raw request body.
+Changing whitespace, field order, or any payload value after signing makes the
+signature invalid.
+
+The receiver verifies the signature before parsing and validating the event:
+
+- valid signature and payload: `202 Accepted`
+- missing or invalid signature: `401 Unauthorized`
+- valid signature with invalid payload: `422 Unprocessable Entity`
+
+The fixed webhook secret is intended only for this educational lab.
+
 ## Connector resilience
 
 The connector retries only responses with status `429 Too Many Requests`.
