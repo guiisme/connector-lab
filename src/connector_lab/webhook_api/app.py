@@ -1,6 +1,8 @@
 from typing import Annotated
 
 from fastapi import FastAPI, Header, Request, status
+from fastapi.exceptions import RequestValidationError
+from pydantic import ValidationError
 
 from connector_lab.webhook_api.models import (
     WebhookAcceptedResponse,
@@ -33,7 +35,13 @@ async def receive_alert_webhook(
         provided_signature=webhook_signature,
     )
 
-    event = WebhookAlertEvent.model_validate_json(payload)
+    try:
+        event = WebhookAlertEvent.model_validate_json(payload)
+    except ValidationError as error:
+        raise RequestValidationError(
+            error.errors(),
+            body=payload,
+        ) from error
 
     return WebhookAcceptedResponse(
         event_id=event.event_id,

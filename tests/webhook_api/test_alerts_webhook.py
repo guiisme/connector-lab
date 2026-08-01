@@ -94,3 +94,28 @@ async def test_unsigned_or_invalid_webhook_is_rejected(
     assert response.json() == {
         "detail": "Invalid webhook signature",
     }
+
+
+@pytest.mark.asyncio
+async def test_signed_invalid_payload_is_rejected() -> None:
+    payload = b"{}"
+    transport = ASGITransport(
+        app=app,
+        raise_app_exceptions=False,
+    )
+
+    async with AsyncClient(
+        transport=transport,
+        base_url="http://test",
+    ) as client:
+        response = await client.post(
+            "/webhooks/alerts",
+            content=payload,
+            headers={
+                "Content-Type": "application/json",
+                "X-Webhook-Signature": sign_payload(payload),
+            },
+        )
+
+    assert response.status_code == 422
+    assert "detail" in response.json()
