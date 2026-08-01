@@ -2,7 +2,10 @@ import pytest
 from httpx import AsyncClient, MockTransport, Request, Response
 
 from connector_lab.client.alerts_connector import AlertsConnector
-from connector_lab.client.errors import ConnectorAuthenticationError
+from connector_lab.client.errors import (
+    ConnectorAuthenticationError,
+    ConnectorPaginationError,
+)
 from connector_lab.client.models import Alert, AlertSeverity
 
 
@@ -124,3 +127,104 @@ async def test_list_alerts_retrieves_all_pages() -> None:
         "alert-003",
     ]
     assert result.total == 3
+
+
+@pytest.mark.asyncio
+async def test_list_alerts_supports_empty_response() -> None:
+    def handle_empty_response(request: Request) -> Response:
+        return Response(
+            status_code=200,
+            json={
+                "items": [],
+                "page": 1,
+                "page_size": 100,
+                "total": 0,
+                "has_next": False,
+            },
+        )
+
+    transport = MockTransport(handle_empty_response)
+
+    async with AsyncClient(transport=transport) as http_client:
+        connector = AlertsConnector(
+            base_url="https://mock-cyber.local",
+            api_key="connector-lab-secret",
+            http_client=http_client,
+        )
+
+        result = await connector.list_alerts()
+
+    assert result.items == []
+    assert result.total == 0
+
+
+@pytest.mark.asyncio
+async def test_list_alerts_rejects_empty_page_with_next_page() -> None:
+    def handle_inconsistent_empty_page(request: Request) -> Response:
+        page = int(request.url.params["page"])
+
+        return Response(
+            status_code=200,
+            json={
+                "items": [],
+                "page": page,
+                "page_size": 100,
+                "total": 1,
+                "has_next": page == 1,
+            },
+        )
+
+    transport = MockTransport(handle_inconsistent_empty_page)
+
+    async with AsyncClient(transport=transport) as http_client:
+        connector = AlertsConnector(
+            base_url="https://mock-cyber.local",
+            api_key="connector-lab-secret",
+            http_client=http_client,
+        )
+
+        with pytest.raises(
+            ConnectorPaginationError,
+            match="Empty page cannot have a next page",
+        ):
+            await connector.list_alerts()
+
+
+@pytest.mark.asyncio
+async def test_list_alerts_rejects_unexpected_page_number() -> None:
+    def handle_unexpected_page(request: Request) -> Response:
+        requested_page = int(request.url.params["page"])
+
+        return Response(
+            status_code=200,
+            json={
+                "items": [
+                    {
+                        "id": f"alert-{requested_page:03}",
+                        "title": "Pagination validation alert",
+                        "severity": "medium",
+                        "status": "open",
+                        "detected_at": "2026-07-31T18:00:00Z",
+                    }
+                ],
+                "page": 1,
+                "page_size": 100,
+                "total": 2,
+                "has_next": requested_page == 1,
+            },
+        )
+
+    transport = MockTransport(handle_unexpected_page)
+
+    async with AsyncClient(transport=transport) as http_client:
+        connector = AlertsConnector(
+            base_url="https://mock-cyber.local",
+            api_key="connector-lab-secret",
+            http_client=http_client,
+        )
+
+        with pytest.raises(
+            ConnectorPaginationError,
+            match="Unexpected page number",
+        ):
+            await connector.list_alerts()

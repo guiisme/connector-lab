@@ -1,6 +1,9 @@
 from httpx import AsyncClient, HTTPStatusError
 
-from connector_lab.client.errors import ConnectorAuthenticationError
+from connector_lab.client.errors import (
+    ConnectorAuthenticationError,
+    ConnectorPaginationError,
+)
 from connector_lab.client.models import (
     Alert,
     AlertCollection,
@@ -47,6 +50,15 @@ class AlertsConnector:
                 raise
 
             alert_page = AlertPage.model_validate(response.json())
+            if alert_page.page != page_number:
+                raise ConnectorPaginationError(
+                    "Unexpected page number",
+                )
+
+            if alert_page.has_next and not alert_page.items:
+                raise ConnectorPaginationError(
+                    "Empty page cannot have a next page",
+                )
             alerts.extend(alert_page.items)
 
             if not alert_page.has_next:
