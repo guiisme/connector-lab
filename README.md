@@ -172,6 +172,46 @@ consolidated collection. Consumers do not need to manage page numbers.
 `page_size` is optional, defaults to `100`, and accepts values from `1` to
 `100`.
 
+## Alert-to-incident workflow
+
+The workflow maps cybersecurity alerts into ITSM incident requests and keeps
+the resulting correlations in memory.
+
+With the alerts and ITSM connectors configured:
+
+```python
+from connector_lab.workflows.alert_to_incident import (
+    AlertToIncidentWorkflow,
+)
+
+workflow = AlertToIncidentWorkflow(
+    incident_creator=itsm_connector,
+)
+
+for alert in alerts.items:
+    result = await workflow.process(alert)
+
+    print(
+        result.alert_id,
+        result.incident_id,
+        result.created,
+    )
+```
+
+Alert severities are mapped directly to incident priorities:
+
+- `low` to `low`
+- `medium` to `medium`
+- `high` to `high`
+- `critical` to `critical`
+
+The first processing of an alert creates an incident and returns
+`created=True`. Reprocessing the same alert with the same workflow instance
+returns the stored correlation with `created=False`.
+
+Correlations exist only in memory. Restarting the process or creating another
+workflow instance clears the idempotency state.
+
 ## Connector resilience
 
 The connector retries only responses with status `429 Too Many Requests`.
