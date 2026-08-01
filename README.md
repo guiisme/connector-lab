@@ -96,6 +96,47 @@ persisted after the process stops.
 
 The fixed API key is intended only for this educational mock API.
 
+## Using the ITSM connector
+
+With the mock ITSM API running, create an incident through the connector:
+
+```python
+import asyncio
+
+from httpx import AsyncClient
+
+from connector_lab.client.itsm_connector import ITSMConnector
+from connector_lab.client.itsm_models import (
+    IncidentCreateRequest,
+    IncidentPriority,
+)
+
+
+async def main() -> None:
+    async with AsyncClient(timeout=5.0) as http_client:
+        connector = ITSMConnector(
+            base_url="http://127.0.0.1:8001",
+            api_key="connector-lab-itsm-secret",
+            http_client=http_client,
+        )
+        request = IncidentCreateRequest(
+            external_reference="alert-001",
+            title="Suspicious PowerShell execution",
+            description="Created from cybersecurity alert alert-001",
+            priority=IncidentPriority.HIGH,
+        )
+
+        incident = await connector.create_incident(request)
+
+    print(incident.incident_id, incident.status)
+
+
+asyncio.run(main())
+```
+
+The connector maps authentication, timeout, and connection failures to the
+same connector-specific errors used by the alerts integration.
+
 ## Using the alerts connector
 
 With the mock API running, the connector can retrieve and parse its alerts:
