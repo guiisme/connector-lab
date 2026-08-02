@@ -583,6 +583,46 @@ The polling clock and sleep function are injectable, allowing lifecycle,
 interval, and timeout behavior to be tested deterministically without real
 waiting.
 
+## Orchestrating idempotent security scans
+
+`SecurityScanWorkflow` maps independent typed scan commands into asynchronous
+connector operations while preventing duplicate jobs for the same operation.
+
+```python
+from connector_lab.client.scan_models import ScanType
+from connector_lab.workflows.security_scan import (
+    SecurityScanCommand,
+    SecurityScanWorkflow,
+)
+
+workflow = SecurityScanWorkflow(
+    security_jobs=security_jobs_connector,
+)
+
+result = await workflow.process(
+    SecurityScanCommand(
+        operation_id="operation-001",
+        target="server.example.com",
+        scan_type=ScanType.VULNERABILITY,
+    ),
+)
+```
+
+The workflow:
+
+- maps a typed command into a scan job creation request
+- correlates each `operation_id` with its resulting `job_id`
+- creates and awaits one asynchronous job for a new operation
+- returns `created=false` when an existing terminal result is reused
+- represents completed, failed, and cancelled outcomes with typed results
+- preserves the job correlation after a global polling timeout
+- resumes the existing job after a timed-out operation is retried
+- never stores a timeout as a terminal result
+
+Correlations and terminal results are stored only in memory and are isolated
+per workflow instance. Restarting the process clears the workflow idempotency
+state.
+
 ## Connector resilience
 
 The connector retries only responses with status `429 Too Many Requests`.
