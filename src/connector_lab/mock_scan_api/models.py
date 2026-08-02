@@ -25,3 +25,13 @@ class ScanJobResponse(BaseModel):
     job_id: str
     external_reference: str
     status: ScanJobStatus
+
+
+class ScanJobResult(BaseModel):
+    total_findings: int
+    critical_findings: int
+    high_findings: int
+
+
+class ScanJobStatusResponse(ScanJobResponse):
+    result: ScanJobResult | None = None
