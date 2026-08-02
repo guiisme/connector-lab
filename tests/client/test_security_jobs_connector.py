@@ -100,3 +100,65 @@ async def test_get_job_returns_typed_completed_result() -> None:
     assert job.result.total_findings == 3
     assert job.result.critical_findings == 1
     assert job.result.high_findings == 2
+
+
+@pytest.mark.asyncio
+async def test_wait_for_job_polls_until_completion() -> None:
+    requested_statuses: list[str] = []
+    sleep_delays: list[float] = []
+    statuses = [
+        "pending",
+        "running",
+        "completed",
+    ]
+
+    async def fake_sleep(delay: float) -> None:
+        sleep_delays.append(delay)
+
+    def handle_status_request(request: Request) -> Response:
+        status_value = statuses[len(requested_statuses)]
+        requested_statuses.append(status_value)
+
+        payload: dict[str, object] = {
+            "job_id": "SCAN-0001",
+            "external_reference": "operation-001",
+            "status": status_value,
+        }
+
+        if status_value == "completed":
+            payload["result"] = {
+                "total_findings": 3,
+                "critical_findings": 1,
+                "high_findings": 2,
+            }
+
+        return Response(
+            status_code=200,
+            json=payload,
+        )
+
+    transport = MockTransport(handle_status_request)
+
+    async with AsyncClient(transport=transport) as http_client:
+        connector = SecurityJobsConnector(
+            base_url="https://mock-scan.local",
+            api_key="connector-lab-scan-secret",
+            http_client=http_client,
+            poll_interval_seconds=2.0,
+            sleep_func=fake_sleep,
+        )
+
+        job = await connector.wait_for_job("SCAN-0001")
+
+    assert requested_statuses == [
+        "pending",
+        "running",
+        "completed",
+    ]
+    assert sleep_delays == [
+        2.0,
+        2.0,
+    ]
+    assert job.status is ScanJobStatus.COMPLETED
+    assert job.result is not None
+    assert job.result.total_findings == 3
