@@ -459,6 +459,66 @@ Authentication failures never invoke the alert processor. Event IDs are marked
 as processed only after the processor completes successfully, allowing a
 failed delivery to be retried.
 
+## Running the mock security scan API
+
+Start the asynchronous scan development server:
+
+```bash
+uv run uvicorn connector_lab.mock_scan_api.app:app \
+  --host 127.0.0.1 \
+  --port 8004
+```
+
+The interactive API documentation is available at:
+
+- <http://127.0.0.1:8004/docs>
+
+Create a scan job:
+
+```bash
+curl \
+  -X POST \
+  -H "X-API-Key: connector-lab-scan-secret" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "external_reference": "operation-001",
+    "target": "server.example.com",
+    "scan_type": "vulnerability"
+  }' \
+  http://127.0.0.1:8004/scan-jobs
+```
+
+Retrieve its current state:
+
+```bash
+curl \
+  -H "X-API-Key: connector-lab-scan-secret" \
+  http://127.0.0.1:8004/scan-jobs/SCAN-0001
+```
+
+Cancel an active job:
+
+```bash
+curl \
+  -X DELETE \
+  -H "X-API-Key: connector-lab-scan-secret" \
+  http://127.0.0.1:8004/scan-jobs/SCAN-0001
+```
+
+The mock lifecycle is deterministic:
+
+- creation returns `pending`
+- the first status request returns `running`
+- the second status request returns `completed`
+- additional status requests preserve the terminal result
+- active jobs can transition to `cancelled`
+- terminal jobs cannot be cancelled
+- setting `simulate_failure=true` makes the second status request return
+  `failed`
+
+Job identifiers and state are stored only in memory and are isolated per
+application instance. Restarting the process clears all jobs.
+
 ## Connector resilience
 
 The connector retries only responses with status `429 Too Many Requests`.
