@@ -124,3 +124,104 @@ async def test_valid_webhook_invokes_alert_processor() -> None:
         "incident_id": "INC-0001",
         "created": True,
     }
+
+
+@pytest.mark.asyncio
+async def test_duplicate_delivery_does_not_invoke_processor_again() -> None:
+    fixed_now = datetime(
+        2026,
+        8,
+        2,
+        0,
+        0,
+        tzinfo=UTC,
+    )
+    timestamp = str(int(fixed_now.timestamp()))
+    payload = json.dumps(
+        {
+            "event_id": "event-duplicate",
+            "event_type": "alert.detected",
+            "alert": {
+                "id": "alert-duplicate",
+                "title": "Repeated webhook delivery",
+                "severity": "medium",
+                "status": "open",
+                "detected_at": "2026-08-01T23:59:00Z",
+            },
+        },
+        separators=(",", ":"),
+    ).encode()
+    headers = {
+        "Content-Type": "application/json",
+        "X-Webhook-Timestamp": timestamp,
+        "X-Webhook-Signature": sign_payload(
+            payload,
+            timestamp,
+        ),
+    }
+    processor = FakeAlertProcessor()
+    test_app = create_app(
+        now_provider=lambda: fixed_now,
+        alert_processor=processor,
+    )
+    transport = ASGITransport(app=test_app)
+
+    async with AsyncClient(
+        transport=transport,
+        base_url="http://test",
+    ) as client:
+        first_response = await client.post(
+            "/webhooks/alerts",
+            content=payload,
+            headers=headers,
+        )
+        second_response = await client.post(
+            "/webhooks/alerts",
+            content=payload,
+            headers=headers,
+        )
+
+    assert first_response.status_code == 202
+    assert second_response.status_code == 202
+    assert len(processor.alerts) == 1
+
+    assert second_response.json() == {
+        "event_id": "event-duplicate",
+        "status": "duplicate",
+    }
+
+
+@pytest.mark.asyncio
+async def test_authentication_failure_does_not_invoke_processor() -> None:
+    fixed_now = datetime(
+        2026,
+        8,
+        2,
+        0,
+        0,
+        tzinfo=UTC,
+    )
+    timestamp = str(int(fixed_now.timestamp()))
+    processor = FakeAlertProcessor()
+    test_app = create_app(
+        now_provider=lambda: fixed_now,
+        alert_processor=processor,
+    )
+    transport = ASGITransport(app=test_app)
+
+    async with AsyncClient(
+        transport=transport,
+        base_url="http://test",
+    ) as client:
+        response = await client.post(
+            "/webhooks/alerts",
+            content=b"{}",
+            headers={
+                "Content-Type": "application/json",
+                "X-Webhook-Timestamp": timestamp,
+                "X-Webhook-Signature": "sha256=invalid",
+            },
+        )
+
+    assert response.status_code == 401
+    assert processor.alerts == []
