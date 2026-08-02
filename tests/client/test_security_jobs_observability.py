@@ -1,11 +1,18 @@
 import pytest
 from httpx import (
     AsyncClient,
+    ConnectError,
     MockTransport,
+    ReadTimeout,
     Request,
     Response,
 )
 
+from connector_lab.client.errors import (
+    ConnectorAuthenticationError,
+    ConnectorConnectionError,
+    ConnectorTimeoutError,
+)
 from connector_lab.client.scan_models import (
     ScanJobCreateRequest,
     ScanType,
@@ -122,3 +129,86 @@ async def test_create_job_generates_correlation_id_when_missing() -> None:
     assert {event.correlation_id for event in recorder.events} == {
         "generated-correlation-001"
     }
+
+
+@pytest.mark.parametrize(
+    (
+        "failure_kind",
+        "expected_error",
+        "expected_error_type",
+    ),
+    [
+        (
+            "authentication",
+            ConnectorAuthenticationError,
+            "ConnectorAuthenticationError",
+        ),
+        (
+            "timeout",
+            ConnectorTimeoutError,
+            "ConnectorTimeoutError",
+        ),
+        (
+            "connection",
+            ConnectorConnectionError,
+            "ConnectorConnectionError",
+        ),
+    ],
+)
+@pytest.mark.asyncio
+async def test_create_job_records_correlated_failure_event(
+    failure_kind: str,
+    expected_error: type[Exception],
+    expected_error_type: str,
+) -> None:
+    def handle_failure(request: Request) -> Response:
+        if failure_kind == "authentication":
+            return Response(
+                status_code=401,
+                json={
+                    "detail": "Invalid API key",
+                },
+            )
+
+        if failure_kind == "timeout":
+            raise ReadTimeout(
+                "Security jobs API timed out",
+                request=request,
+            )
+
+        raise ConnectError(
+            "Security jobs API is unavailable",
+            request=request,
+        )
+
+    recorder = RecordingEventRecorder()
+    transport = MockTransport(handle_failure)
+
+    async with AsyncClient(transport=transport) as http_client:
+        connector = SecurityJobsConnector(
+            base_url="https://mock-scan.local",
+            api_key="connector-lab-scan-secret",
+            http_client=http_client,
+            event_recorder=recorder,
+        )
+        request = ScanJobCreateRequest(
+            external_reference="operation-001",
+            target="server.example.com",
+            scan_type=ScanType.VULNERABILITY,
+        )
+
+        with pytest.raises(expected_error):
+            await connector.create_job(
+                request,
+                correlation_id="correlation-failed",
+            )
+
+    assert len(recorder.events) == 2
+    assert recorder.events[0].outcome is (OperationalEventOutcome.STARTED)
+    assert recorder.events[1] == OperationalEvent(
+        correlation_id="correlation-failed",
+        component="security_jobs_connector",
+        operation="create_job",
+        outcome=OperationalEventOutcome.FAILED,
+        error_type=expected_error_type,
+    )

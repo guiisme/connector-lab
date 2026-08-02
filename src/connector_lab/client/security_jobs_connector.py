@@ -105,11 +105,26 @@ class SecurityJobsConnector:
             ),
         )
 
-        response = await self._send_request(
-            method="POST",
-            url=f"{self._base_url}/scan-jobs",
-            json_payload=request.model_dump(mode="json"),
-        )
+        try:
+            response = await self._send_request(
+                method="POST",
+                url=f"{self._base_url}/scan-jobs",
+                json_payload=request.model_dump(mode="json"),
+            )
+            created_job = ScanJobCreateResponse.model_validate(
+                response.json(),
+            )
+        except Exception as error:
+            self._event_recorder.record(
+                OperationalEvent(
+                    correlation_id=resolved_correlation_id,
+                    component="security_jobs_connector",
+                    operation="create_job",
+                    outcome=OperationalEventOutcome.FAILED,
+                    error_type=type(error).__name__,
+                ),
+            )
+            raise
 
         self._event_recorder.record(
             OperationalEvent(
@@ -120,9 +135,7 @@ class SecurityJobsConnector:
             ),
         )
 
-        return ScanJobCreateResponse.model_validate(
-            response.json(),
-        )
+        return created_job
 
     async def get_job(
         self,
