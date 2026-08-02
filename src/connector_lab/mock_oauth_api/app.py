@@ -21,6 +21,7 @@ from connector_lab.mock_oauth_api.models import TokenResponse
 
 ACCESS_TOKEN = "connector-lab-access-token"
 TOKEN_EXPIRES_IN = 300
+ALLOWED_SCOPES = {"alerts:read"}
 
 basic_auth = HTTPBasic(auto_error=False)
 
@@ -59,6 +60,14 @@ async def issue_access_token(
     if grant_type != "client_credentials":
         raise OAuthError(
             error="unsupported_grant_type",
+            status_code=status.HTTP_400_BAD_REQUEST,
+        )
+
+    requested_scopes = set(scope.split())
+
+    if not requested_scopes.issubset(ALLOWED_SCOPES):
+        raise OAuthError(
+            error="invalid_scope",
             status_code=status.HTTP_400_BAD_REQUEST,
         )
 
