@@ -519,6 +519,70 @@ The mock lifecycle is deterministic:
 Job identifiers and state are stored only in memory and are isolated per
 application instance. Restarting the process clears all jobs.
 
+## Using the asynchronous security jobs connector
+
+`SecurityJobsConnector` creates, monitors, and cancels asynchronous security
+scan jobs through independent typed client models.
+
+With the mock security scan API running:
+
+```python
+import asyncio
+
+from httpx import AsyncClient
+
+from connector_lab.client.scan_models import (
+    ScanJobCreateRequest,
+    ScanType,
+)
+from connector_lab.client.security_jobs_connector import (
+    SecurityJobsConnector,
+)
+
+
+async def main() -> None:
+    async with AsyncClient(timeout=5.0) as http_client:
+        connector = SecurityJobsConnector(
+            base_url="http://127.0.0.1:8004",
+            api_key="connector-lab-scan-secret",
+            http_client=http_client,
+            poll_interval_seconds=0.5,
+            poll_timeout_seconds=30.0,
+        )
+
+        job = await connector.create_and_wait(
+            ScanJobCreateRequest(
+                external_reference="operation-001",
+                target="server.example.com",
+                scan_type=ScanType.VULNERABILITY,
+            ),
+        )
+
+    print(job.job_id, job.status)
+
+    if job.result is not None:
+        print(job.result.total_findings)
+
+
+asyncio.run(main())
+```
+
+The connector:
+
+- sends typed scan job creation requests
+- retrieves typed job lifecycle states and results
+- polls `pending` and `running` jobs until a terminal state
+- supports configurable polling intervals
+- enforces a global polling timeout
+- allows active jobs to be cancelled explicitly
+- maps failed and cancelled terminal states to connector-specific errors
+- maps authentication, request timeout, and connection failures to
+  connector-specific errors
+
+The polling clock and sleep function are injectable, allowing lifecycle,
+interval, and timeout behavior to be tested deterministically without real
+waiting.
+
 ## Connector resilience
 
 The connector retries only responses with status `429 Too Many Requests`.
