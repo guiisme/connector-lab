@@ -20,3 +20,7 @@ class ConnectorRateLimitError(Exception):
 
 class ConnectorAuthorizationError(Exception):
     """Raised when connector credentials lack required authorization."""
+
+
+class ConnectorJobTimeoutError(Exception):
+    """Raised when asynchronous job polling exceeds its global timeout."""

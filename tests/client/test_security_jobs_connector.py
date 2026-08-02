@@ -1,4 +1,5 @@
 import json
+from datetime import UTC, datetime, timedelta
 
 import pytest
 from httpx import (
@@ -8,6 +9,7 @@ from httpx import (
     Response,
 )
 
+from connector_lab.client.errors import ConnectorJobTimeoutError
 from connector_lab.client.scan_models import (
     ScanJobCreateRequest,
     ScanJobStatus,
@@ -162,3 +164,62 @@ async def test_wait_for_job_polls_until_completion() -> None:
     assert job.status is ScanJobStatus.COMPLETED
     assert job.result is not None
     assert job.result.total_findings == 3
+
+
+@pytest.mark.asyncio
+async def test_wait_for_job_stops_after_global_timeout() -> None:
+    fixed_now = datetime(
+        2026,
+        8,
+        2,
+        12,
+        0,
+        tzinfo=UTC,
+    )
+    clock_values = iter(
+        [
+            fixed_now,
+            fixed_now,
+            fixed_now + timedelta(seconds=6),
+        ],
+    )
+    status_requests = 0
+    sleep_delays: list[float] = []
+
+    async def fake_sleep(delay: float) -> None:
+        sleep_delays.append(delay)
+
+    def handle_pending_status(request: Request) -> Response:
+        nonlocal status_requests
+        status_requests += 1
+
+        return Response(
+            status_code=200,
+            json={
+                "job_id": "SCAN-0001",
+                "external_reference": "operation-timeout",
+                "status": "pending",
+            },
+        )
+
+    transport = MockTransport(handle_pending_status)
+
+    async with AsyncClient(transport=transport) as http_client:
+        connector = SecurityJobsConnector(
+            base_url="https://mock-scan.local",
+            api_key="connector-lab-scan-secret",
+            http_client=http_client,
+            poll_interval_seconds=2.0,
+            poll_timeout_seconds=5.0,
+            sleep_func=fake_sleep,
+            now_provider=lambda: next(clock_values),
+        )
+
+        with pytest.raises(
+            ConnectorJobTimeoutError,
+            match="Security job polling timed out",
+        ):
+            await connector.wait_for_job("SCAN-0001")
+
+    assert status_requests == 1
+    assert sleep_delays == [2.0]
