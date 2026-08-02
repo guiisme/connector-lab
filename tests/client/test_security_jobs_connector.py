@@ -4,15 +4,20 @@ from datetime import UTC, datetime, timedelta
 import pytest
 from httpx import (
     AsyncClient,
+    ConnectError,
     MockTransport,
+    ReadTimeout,
     Request,
     Response,
 )
 
 from connector_lab.client.errors import (
+    ConnectorAuthenticationError,
+    ConnectorConnectionError,
     ConnectorJobCancelledError,
     ConnectorJobFailedError,
     ConnectorJobTimeoutError,
+    ConnectorTimeoutError,
 )
 from connector_lab.client.scan_models import (
     ScanJobCreateRequest,
@@ -319,3 +324,77 @@ async def test_wait_for_job_maps_unsuccessful_terminal_states(
             match=expected_message,
         ):
             await connector.wait_for_job("SCAN-0001")
+
+
+@pytest.mark.asyncio
+async def test_security_jobs_connector_maps_authentication_failure() -> None:
+    def handle_unauthorized(request: Request) -> Response:
+        return Response(
+            status_code=401,
+            json={
+                "detail": "Invalid API key",
+            },
+        )
+
+    transport = MockTransport(handle_unauthorized)
+
+    async with AsyncClient(transport=transport) as http_client:
+        connector = SecurityJobsConnector(
+            base_url="https://mock-scan.local",
+            api_key="invalid-key",
+            http_client=http_client,
+        )
+
+        with pytest.raises(
+            ConnectorAuthenticationError,
+            match="Security jobs authentication failed",
+        ):
+            await connector.get_job("SCAN-0001")
+
+
+@pytest.mark.asyncio
+async def test_security_jobs_connector_maps_timeout_failure() -> None:
+    def handle_timeout(request: Request) -> Response:
+        raise ReadTimeout(
+            "Security jobs API timed out",
+            request=request,
+        )
+
+    transport = MockTransport(handle_timeout)
+
+    async with AsyncClient(transport=transport) as http_client:
+        connector = SecurityJobsConnector(
+            base_url="https://mock-scan.local",
+            api_key="connector-lab-scan-secret",
+            http_client=http_client,
+        )
+
+        with pytest.raises(
+            ConnectorTimeoutError,
+            match="Security jobs request timed out",
+        ):
+            await connector.get_job("SCAN-0001")
+
+
+@pytest.mark.asyncio
+async def test_security_jobs_connector_maps_connection_failure() -> None:
+    def handle_connection_failure(request: Request) -> Response:
+        raise ConnectError(
+            "Security jobs API is unavailable",
+            request=request,
+        )
+
+    transport = MockTransport(handle_connection_failure)
+
+    async with AsyncClient(transport=transport) as http_client:
+        connector = SecurityJobsConnector(
+            base_url="https://mock-scan.local",
+            api_key="connector-lab-scan-secret",
+            http_client=http_client,
+        )
+
+        with pytest.raises(
+            ConnectorConnectionError,
+            match="Security jobs endpoint is unavailable",
+        ):
+            await connector.get_job("SCAN-0001")

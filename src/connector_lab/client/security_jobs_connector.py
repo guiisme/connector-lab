@@ -2,12 +2,21 @@ from asyncio import sleep
 from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime
 
-from httpx import AsyncClient
+from httpx import (
+    AsyncClient,
+    ConnectError,
+    HTTPStatusError,
+    Response,
+    TimeoutException,
+)
 
 from connector_lab.client.errors import (
+    ConnectorAuthenticationError,
+    ConnectorConnectionError,
     ConnectorJobCancelledError,
     ConnectorJobFailedError,
     ConnectorJobTimeoutError,
+    ConnectorTimeoutError,
 )
 from connector_lab.client.scan_models import (
     ScanJobCreateRequest,
@@ -64,14 +73,11 @@ class SecurityJobsConnector:
         self,
         request: ScanJobCreateRequest,
     ) -> ScanJobCreateResponse:
-        response = await self._http_client.post(
-            f"{self._base_url}/scan-jobs",
-            headers={
-                "X-API-Key": self._api_key,
-            },
-            json=request.model_dump(mode="json"),
+        response = await self._send_request(
+            method="POST",
+            url=f"{self._base_url}/scan-jobs",
+            json_payload=request.model_dump(mode="json"),
         )
-        response.raise_for_status()
 
         return ScanJobCreateResponse.model_validate(
             response.json(),
@@ -81,13 +87,10 @@ class SecurityJobsConnector:
         self,
         job_id: str,
     ) -> ScanJobStatusResponse:
-        response = await self._http_client.get(
-            f"{self._base_url}/scan-jobs/{job_id}",
-            headers={
-                "X-API-Key": self._api_key,
-            },
+        response = await self._send_request(
+            method="GET",
+            url=f"{self._base_url}/scan-jobs/{job_id}",
         )
-        response.raise_for_status()
 
         return ScanJobStatusResponse.model_validate(
             response.json(),
@@ -131,14 +134,57 @@ class SecurityJobsConnector:
         self,
         job_id: str,
     ) -> ScanJobStatusResponse:
-        response = await self._http_client.delete(
-            f"{self._base_url}/scan-jobs/{job_id}",
-            headers={
-                "X-API-Key": self._api_key,
-            },
+        response = await self._send_request(
+            method="DELETE",
+            url=f"{self._base_url}/scan-jobs/{job_id}",
         )
-        response.raise_for_status()
 
         return ScanJobStatusResponse.model_validate(
             response.json(),
         )
+
+    async def _send_request(
+        self,
+        *,
+        method: str,
+        url: str,
+        json_payload: object | None = None,
+    ) -> Response:
+        headers = {
+            "X-API-Key": self._api_key,
+        }
+
+        try:
+            if json_payload is None:
+                response = await self._http_client.request(
+                    method,
+                    url,
+                    headers=headers,
+                )
+            else:
+                response = await self._http_client.request(
+                    method,
+                    url,
+                    headers=headers,
+                    json=json_payload,
+                )
+        except TimeoutException as error:
+            raise ConnectorTimeoutError(
+                "Security jobs request timed out",
+            ) from error
+        except ConnectError as error:
+            raise ConnectorConnectionError(
+                "Security jobs endpoint is unavailable",
+            ) from error
+
+        try:
+            response.raise_for_status()
+        except HTTPStatusError as error:
+            if error.response.status_code == 401:
+                raise ConnectorAuthenticationError(
+                    "Security jobs authentication failed",
+                ) from error
+
+            raise
+
+        return response
