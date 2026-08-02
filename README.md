@@ -238,15 +238,33 @@ Requests must include an `X-Webhook-Signature` header in this format:
 sha256=<hexadecimal HMAC digest>
 ```
 
-The digest is calculated with HMAC-SHA256 over the exact raw request body.
-Changing whitespace, field order, or any payload value after signing makes the
-signature invalid.
+Requests must also include an `X-Webhook-Timestamp` header containing the Unix
+timestamp in seconds used when generating the signature.
 
-The receiver verifies the signature before parsing and validating the event:
+The signed content is constructed as:
 
-- valid signature and payload: `202 Accepted`
+```text
+<timestamp>.<raw request body>
+```
+
+The digest is calculated with HMAC-SHA256 over those exact bytes. Changing the
+timestamp, whitespace, field order, or any payload value after signing makes
+the signature invalid.
+
+Delivery timestamps must be within 300 seconds of the receiver clock. Older
+events and events more than 300 seconds in the future are rejected.
+
+The receiver verifies the signature and timestamp before parsing and
+validating the event:
+
+- valid signature, timestamp, and payload: `202 Accepted`
 - missing or invalid signature: `401 Unauthorized`
-- valid signature with invalid payload: `422 Unprocessable Entity`
+- missing, malformed, expired, or future timestamp: `401 Unauthorized`
+- valid authentication with invalid payload: `422 Unprocessable Entity`
+- repeated `event_id`: `202 Accepted` with status `duplicate`
+
+Processed event IDs are stored only in memory and are isolated per application
+instance. Restarting the process clears the event idempotency state.
 
 The fixed webhook secret is intended only for this educational lab.
 
