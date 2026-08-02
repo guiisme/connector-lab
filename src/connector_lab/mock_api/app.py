@@ -10,6 +10,7 @@ from connector_lab.mock_api.models import (
     AlertSeverity,
     AlertStatus,
 )
+from connector_lab.mock_api.oauth import require_bearer_token
 
 app = FastAPI(
     title="Mock Cyber API",
@@ -34,16 +35,10 @@ SAMPLE_ALERTS = [
 ]
 
 
-@app.get("/health")
-def get_health() -> dict[str, str]:
-    return {"status": "ok"}
-
-
-@app.get("/alerts", response_model=AlertCollection)
-def get_alerts(
-    _: Annotated[None, Depends(require_api_key)],
-    page: Annotated[int, Query(ge=1)] = 1,
-    page_size: Annotated[int, Query(ge=1, le=100)] = 50,
+def paginate_alerts(
+    *,
+    page: int,
+    page_size: int,
 ) -> AlertCollection:
     total = len(SAMPLE_ALERTS)
     start = (page - 1) * page_size
@@ -56,4 +51,36 @@ def get_alerts(
         page_size=page_size,
         total=total,
         has_next=end < total,
+    )
+
+
+@app.get("/health")
+def get_health() -> dict[str, str]:
+    return {"status": "ok"}
+
+
+@app.get("/alerts", response_model=AlertCollection)
+def get_alerts(
+    _: Annotated[None, Depends(require_api_key)],
+    page: Annotated[int, Query(ge=1)] = 1,
+    page_size: Annotated[int, Query(ge=1, le=100)] = 50,
+) -> AlertCollection:
+    return paginate_alerts(
+        page=page,
+        page_size=page_size,
+    )
+
+
+@app.get(
+    "/oauth/alerts",
+    response_model=AlertCollection,
+)
+def get_oauth_alerts(
+    _: Annotated[None, Depends(require_bearer_token)],
+    page: Annotated[int, Query(ge=1)] = 1,
+    page_size: Annotated[int, Query(ge=1, le=100)] = 50,
+) -> AlertCollection:
+    return paginate_alerts(
+        page=page,
+        page_size=page_size,
     )
