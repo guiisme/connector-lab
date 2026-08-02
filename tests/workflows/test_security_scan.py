@@ -1,6 +1,10 @@
 import pytest
 
-from connector_lab.client.errors import ConnectorJobTimeoutError
+from connector_lab.client.errors import (
+    ConnectorJobCancelledError,
+    ConnectorJobFailedError,
+    ConnectorJobTimeoutError,
+)
 from connector_lab.client.scan_models import (
     ScanJobCreateRequest,
     ScanJobCreateResponse,
@@ -77,6 +81,23 @@ class TimeoutThenCompleteSecurityJobs(FakeSecurityJobs):
                 high_findings=2,
             ),
         )
+
+
+class UnsuccessfulSecurityJobs(FakeSecurityJobs):
+    def __init__(
+        self,
+        *,
+        wait_error: Exception,
+    ) -> None:
+        super().__init__()
+        self._wait_error = wait_error
+
+    async def wait_for_job(
+        self,
+        job_id: str,
+    ) -> ScanJobStatusResponse:
+        self.waited_job_ids.append(job_id)
+        raise self._wait_error
 
 
 @pytest.mark.asyncio
@@ -169,3 +190,62 @@ async def test_timed_out_operation_resumes_existing_job() -> None:
     assert result.result is not None
     assert result.result.total_findings == 3
     assert result.created is False
+
+
+@pytest.mark.parametrize(
+    (
+        "wait_error",
+        "expected_status",
+        "expected_error",
+    ),
+    [
+        (
+            ConnectorJobFailedError(
+                "Security job failed: Simulated scan failure",
+            ),
+            ScanJobStatus.FAILED,
+            "Security job failed: Simulated scan failure",
+        ),
+        (
+            ConnectorJobCancelledError(
+                "Security job was cancelled",
+            ),
+            ScanJobStatus.CANCELLED,
+            "Security job was cancelled",
+        ),
+    ],
+)
+@pytest.mark.asyncio
+async def test_unsuccessful_operation_returns_cached_typed_result(
+    wait_error: Exception,
+    expected_status: ScanJobStatus,
+    expected_error: str,
+) -> None:
+    security_jobs = UnsuccessfulSecurityJobs(
+        wait_error=wait_error,
+    )
+    workflow = SecurityScanWorkflow(
+        security_jobs=security_jobs,
+    )
+    command = SecurityScanCommand(
+        operation_id="operation-unsuccessful",
+        target="server.example.com",
+        scan_type=ScanType.VULNERABILITY,
+    )
+
+    first_result = await workflow.process(command)
+    second_result = await workflow.process(command)
+
+    assert len(security_jobs.create_requests) == 1
+    assert security_jobs.waited_job_ids == ["SCAN-0001"]
+
+    assert first_result.operation_id == "operation-unsuccessful"
+    assert first_result.job_id == "SCAN-0001"
+    assert first_result.status is expected_status
+    assert first_result.result is None
+    assert first_result.error == expected_error
+    assert first_result.created is True
+
+    assert second_result == first_result.model_copy(
+        update={"created": False},
+    )

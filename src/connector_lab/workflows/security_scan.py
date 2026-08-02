@@ -2,6 +2,10 @@ from typing import Protocol
 
 from pydantic import BaseModel, Field
 
+from connector_lab.client.errors import (
+    ConnectorJobCancelledError,
+    ConnectorJobFailedError,
+)
 from connector_lab.client.scan_models import (
     ScanJobCreateRequest,
     ScanJobCreateResponse,
@@ -85,17 +89,36 @@ class SecurityScanWorkflow:
             self._correlations[command.operation_id] = job_id
             created = True
 
-        completed_job = await self._security_jobs.wait_for_job(
-            job_id,
-        )
-        workflow_result = SecurityScanWorkflowResult(
-            operation_id=command.operation_id,
-            job_id=job_id,
-            status=completed_job.status,
-            result=completed_job.result,
-            error=completed_job.error,
-            created=created,
-        )
+        try:
+            completed_job = await self._security_jobs.wait_for_job(
+                job_id,
+            )
+        except ConnectorJobFailedError as error:
+            workflow_result = SecurityScanWorkflowResult(
+                operation_id=command.operation_id,
+                job_id=job_id,
+                status=ScanJobStatus.FAILED,
+                error=str(error),
+                created=created,
+            )
+        except ConnectorJobCancelledError as error:
+            workflow_result = SecurityScanWorkflowResult(
+                operation_id=command.operation_id,
+                job_id=job_id,
+                status=ScanJobStatus.CANCELLED,
+                error=str(error),
+                created=created,
+            )
+        else:
+            workflow_result = SecurityScanWorkflowResult(
+                operation_id=command.operation_id,
+                job_id=job_id,
+                status=completed_job.status,
+                result=completed_job.result,
+                error=completed_job.error,
+                created=created,
+            )
+
         self._results[command.operation_id] = workflow_result
 
         return workflow_result
