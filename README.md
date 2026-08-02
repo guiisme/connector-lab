@@ -318,6 +318,39 @@ instance. Restarting the process clears the event idempotency state.
 
 The fixed webhook secret is intended only for this educational lab.
 
+## Retrieving alerts with OAuth 2.0
+
+The mock Cyber API also exposes an OAuth-protected alerts resource:
+
+```text
+GET /oauth/alerts
+```
+
+Request alerts with the Bearer token issued by the mock OAuth server:
+
+```bash
+curl \
+  -H "Authorization: Bearer connector-lab-access-token" \
+  "http://127.0.0.1:8000/oauth/alerts?page=1&page_size=1"
+```
+
+The OAuth resource returns the same typed and paginated alert collection as
+the API Key endpoint. The original `/alerts` endpoint remains available for
+comparing the two authentication mechanisms.
+
+The resource server:
+
+- requires an `Authorization: Bearer <token>` header
+- rejects missing, malformed, and unknown tokens with `401 Unauthorized`
+- rejects expired tokens with `401 Unauthorized`
+- requires the `alerts:read` scope
+- returns `403 Forbidden` when the token lacks the required scope
+
+For this educational mock, the deterministic token is valid for 300 seconds
+after the mock Cyber API starts. Restarting the API creates a new validation
+window. The injectable clock is used by tests to validate expiration without
+real waiting.
+
 ## Connecting webhooks to the incident workflow
 
 The webhook application can receive an alert processor through `create_app()`.
