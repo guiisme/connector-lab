@@ -1,5 +1,6 @@
 import pytest
 
+from connector_lab.client.errors import ConnectorJobTimeoutError
 from connector_lab.client.scan_models import (
     ScanJobCreateRequest,
     ScanJobCreateResponse,
@@ -40,6 +41,35 @@ class FakeSecurityJobs:
         return ScanJobStatusResponse(
             job_id=job_id,
             external_reference="operation-001",
+            status=ScanJobStatus.COMPLETED,
+            result=ScanJobResult(
+                total_findings=3,
+                critical_findings=1,
+                high_findings=2,
+            ),
+        )
+
+
+class TimeoutThenCompleteSecurityJobs(FakeSecurityJobs):
+    def __init__(self) -> None:
+        super().__init__()
+        self.wait_attempts = 0
+
+    async def wait_for_job(
+        self,
+        job_id: str,
+    ) -> ScanJobStatusResponse:
+        self.waited_job_ids.append(job_id)
+        self.wait_attempts += 1
+
+        if self.wait_attempts == 1:
+            raise ConnectorJobTimeoutError(
+                "Security job polling timed out",
+            )
+
+        return ScanJobStatusResponse(
+            job_id=job_id,
+            external_reference="operation-timeout",
             status=ScanJobStatus.COMPLETED,
             result=ScanJobResult(
                 total_findings=3,
@@ -106,3 +136,36 @@ async def test_reprocessed_operation_returns_existing_result() -> None:
     assert first_result.result == second_result.result
     assert first_result.created is True
     assert second_result.created is False
+
+
+@pytest.mark.asyncio
+async def test_timed_out_operation_resumes_existing_job() -> None:
+    security_jobs = TimeoutThenCompleteSecurityJobs()
+    workflow = SecurityScanWorkflow(
+        security_jobs=security_jobs,
+    )
+    command = SecurityScanCommand(
+        operation_id="operation-timeout",
+        target="slow-server.example.com",
+        scan_type=ScanType.VULNERABILITY,
+    )
+
+    with pytest.raises(
+        ConnectorJobTimeoutError,
+        match="Security job polling timed out",
+    ):
+        await workflow.process(command)
+
+    result = await workflow.process(command)
+
+    assert len(security_jobs.create_requests) == 1
+    assert security_jobs.waited_job_ids == [
+        "SCAN-0001",
+        "SCAN-0001",
+    ]
+    assert result.operation_id == "operation-timeout"
+    assert result.job_id == "SCAN-0001"
+    assert result.status is ScanJobStatus.COMPLETED
+    assert result.result is not None
+    assert result.result.total_findings == 3
+    assert result.created is False
