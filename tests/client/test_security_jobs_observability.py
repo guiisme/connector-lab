@@ -1,3 +1,5 @@
+import json
+
 import pytest
 from httpx import (
     AsyncClient,
@@ -361,3 +363,45 @@ async def test_create_and_wait_reuses_one_generated_correlation_id() -> None:
     assert {event.correlation_id for event in recorder.events} == {
         "generated-correlation-1"
     }
+
+
+@pytest.mark.asyncio
+async def test_connector_events_exclude_credentials_and_payload() -> None:
+    def handle_create_request(request: Request) -> Response:
+        return Response(
+            status_code=202,
+            json={
+                "job_id": "SCAN-0001",
+                "external_reference": ("sensitive-operation-reference"),
+                "status": "pending",
+            },
+        )
+
+    recorder = RecordingEventRecorder()
+    transport = MockTransport(handle_create_request)
+
+    async with AsyncClient(transport=transport) as http_client:
+        connector = SecurityJobsConnector(
+            base_url="https://mock-scan.local",
+            api_key="connector-lab-scan-secret",
+            http_client=http_client,
+            event_recorder=recorder,
+        )
+
+        await connector.create_job(
+            ScanJobCreateRequest(
+                external_reference=("sensitive-operation-reference"),
+                target="internal-server.example.com",
+                scan_type=ScanType.VULNERABILITY,
+            ),
+            correlation_id="safe-correlation-001",
+        )
+
+    serialized_events = json.dumps(
+        [event.model_dump(mode="json") for event in recorder.events],
+    )
+
+    assert "connector-lab-scan-secret" not in serialized_events
+    assert "sensitive-operation-reference" not in serialized_events
+    assert "internal-server.example.com" not in serialized_events
+    assert "safe-correlation-001" in serialized_events
