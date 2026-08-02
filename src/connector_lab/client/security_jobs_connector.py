@@ -3,6 +3,7 @@ from httpx import AsyncClient
 from connector_lab.client.scan_models import (
     ScanJobCreateRequest,
     ScanJobCreateResponse,
+    ScanJobStatusResponse,
 )
 
 
@@ -32,5 +33,21 @@ class SecurityJobsConnector:
         response.raise_for_status()
 
         return ScanJobCreateResponse.model_validate(
+            response.json(),
+        )
+
+    async def get_job(
+        self,
+        job_id: str,
+    ) -> ScanJobStatusResponse:
+        response = await self._http_client.get(
+            f"{self._base_url}/scan-jobs/{job_id}",
+            headers={
+                "X-API-Key": self._api_key,
+            },
+        )
+        response.raise_for_status()
+
+        return ScanJobStatusResponse.model_validate(
             response.json(),
         )

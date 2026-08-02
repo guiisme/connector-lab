@@ -11,6 +11,7 @@ from httpx import (
 from connector_lab.client.scan_models import (
     ScanJobCreateRequest,
     ScanJobStatus,
+    ScanJobStatusResponse,
     ScanType,
 )
 from connector_lab.client.security_jobs_connector import (
@@ -59,3 +60,43 @@ async def test_create_job_sends_typed_request() -> None:
     assert job.job_id == "SCAN-0001"
     assert job.external_reference == "operation-001"
     assert job.status is ScanJobStatus.PENDING
+
+
+@pytest.mark.asyncio
+async def test_get_job_returns_typed_completed_result() -> None:
+    def handle_status_request(request: Request) -> Response:
+        assert request.method == "GET"
+        assert str(request.url) == ("https://mock-scan.local/scan-jobs/SCAN-0001")
+        assert request.headers["X-API-Key"] == ("connector-lab-scan-secret")
+
+        return Response(
+            status_code=200,
+            json={
+                "job_id": "SCAN-0001",
+                "external_reference": "operation-001",
+                "status": "completed",
+                "result": {
+                    "total_findings": 3,
+                    "critical_findings": 1,
+                    "high_findings": 2,
+                },
+            },
+        )
+
+    transport = MockTransport(handle_status_request)
+
+    async with AsyncClient(transport=transport) as http_client:
+        connector = SecurityJobsConnector(
+            base_url="https://mock-scan.local",
+            api_key="connector-lab-scan-secret",
+            http_client=http_client,
+        )
+
+        job = await connector.get_job("SCAN-0001")
+
+    assert isinstance(job, ScanJobStatusResponse)
+    assert job.status is ScanJobStatus.COMPLETED
+    assert job.result is not None
+    assert job.result.total_findings == 3
+    assert job.result.critical_findings == 1
+    assert job.result.high_findings == 2
