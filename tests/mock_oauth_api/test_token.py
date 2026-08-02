@@ -95,3 +95,29 @@ async def test_invalid_client_credentials_are_rejected(
     assert response.json() == {
         "error": "invalid_client",
     }
+
+
+@pytest.mark.asyncio
+async def test_unsupported_grant_type_is_rejected() -> None:
+    transport = ASGITransport(app=app)
+
+    async with AsyncClient(
+        transport=transport,
+        base_url="http://test",
+    ) as client:
+        response = await client.post(
+            "/oauth/token",
+            data={
+                "grant_type": "authorization_code",
+                "scope": "alerts:read",
+            },
+            auth=BasicAuth(
+                username="connector-lab-client",
+                password="connector-lab-client-secret",
+            ),
+        )
+
+    assert response.status_code == 400
+    assert response.json() == {
+        "error": "unsupported_grant_type",
+    }

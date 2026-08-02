@@ -5,6 +5,7 @@ from fastapi import (
     FastAPI,
     Form,
     Request,
+    status,
 )
 from fastapi.responses import JSONResponse
 from fastapi.security import (
@@ -54,6 +55,12 @@ async def issue_access_token(
     scope: Annotated[str, Form()] = "",
 ) -> TokenResponse:
     authenticate_client(credentials)
+
+    if grant_type != "client_credentials":
+        raise OAuthError(
+            error="unsupported_grant_type",
+            status_code=status.HTTP_400_BAD_REQUEST,
+        )
 
     return TokenResponse(
         access_token=ACCESS_TOKEN,
