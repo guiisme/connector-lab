@@ -90,3 +90,47 @@ async def test_scan_job_progresses_to_stable_completed_result() -> None:
     assert completed_response.json() == expected_completed
     assert stable_response.status_code == 200
     assert stable_response.json() == expected_completed
+
+
+@pytest.mark.asyncio
+async def test_active_scan_job_can_be_cancelled() -> None:
+    test_app = create_app()
+    transport = ASGITransport(app=test_app)
+    headers = {
+        "X-API-Key": "connector-lab-scan-secret",
+    }
+
+    async with AsyncClient(
+        transport=transport,
+        base_url="http://test",
+    ) as client:
+        create_response = await client.post(
+            "/scan-jobs",
+            headers=headers,
+            json={
+                "external_reference": "operation-cancel",
+                "target": "application.example.com",
+                "scan_type": "vulnerability",
+            },
+        )
+        job_id = create_response.json()["job_id"]
+
+        cancel_response = await client.delete(
+            f"/scan-jobs/{job_id}",
+            headers=headers,
+        )
+        stable_response = await client.get(
+            f"/scan-jobs/{job_id}",
+            headers=headers,
+        )
+
+    expected_cancelled = {
+        "job_id": "SCAN-0001",
+        "external_reference": "operation-cancel",
+        "status": "cancelled",
+    }
+
+    assert cancel_response.status_code == 200
+    assert cancel_response.json() == expected_cancelled
+    assert stable_response.status_code == 200
+    assert stable_response.json() == expected_cancelled

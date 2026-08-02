@@ -95,6 +95,43 @@ def create_app() -> FastAPI:
             result=result,
         )
 
+    @api.delete(
+        "/scan-jobs/{job_id}",
+        response_model=ScanJobStatusResponse,
+        response_model_exclude_none=True,
+    )
+    def cancel_scan_job(
+        job_id: str,
+        _: Annotated[None, Depends(require_api_key)],
+    ) -> ScanJobStatusResponse:
+        job = jobs.get(job_id)
+
+        if job is None:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Scan job not found",
+            )
+
+        terminal_statuses = {
+            ScanJobStatus.COMPLETED,
+            ScanJobStatus.FAILED,
+            ScanJobStatus.CANCELLED,
+        }
+
+        if job.status in terminal_statuses:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="Terminal scan job cannot be cancelled",
+            )
+
+        job.status = ScanJobStatus.CANCELLED
+
+        return ScanJobStatusResponse(
+            job_id=job_id,
+            external_reference=(job.request.external_reference),
+            status=job.status,
+        )
+
     return api
 
 
