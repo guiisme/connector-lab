@@ -351,6 +351,67 @@ after the mock Cyber API starts. Restarting the API creates a new validation
 window. The injectable clock is used by tests to validate expiration without
 real waiting.
 
+## Using the OAuth alerts connector
+
+`OAuthTokenProvider` implements the Client Credentials flow and manages the
+access-token lifecycle independently from the alerts connector.
+
+With both mock APIs running:
+
+```python
+import asyncio
+
+from httpx import AsyncClient
+
+from connector_lab.client.oauth_alerts_connector import (
+    OAuthAlertsConnector,
+)
+from connector_lab.client.oauth_token_provider import (
+    OAuthTokenProvider,
+)
+
+
+async def main() -> None:
+    async with AsyncClient(timeout=5.0) as http_client:
+        token_provider = OAuthTokenProvider(
+            token_url="http://127.0.0.1:8003/oauth/token",
+            client_id="connector-lab-client",
+            client_secret="connector-lab-client-secret",
+            scope="alerts:read",
+            http_client=http_client,
+            expiration_margin_seconds=30,
+        )
+        connector = OAuthAlertsConnector(
+            base_url="http://127.0.0.1:8000",
+            token_provider=token_provider,
+            http_client=http_client,
+            page_size=1,
+        )
+
+        alerts = await connector.list_alerts()
+
+    for alert in alerts.items:
+        print(alert.id, alert.title)
+
+
+asyncio.run(main())
+```
+
+The token provider:
+
+- requests tokens using HTTP Basic client authentication
+- parses successful and error responses into independent typed models
+- caches a valid token between connector calls
+- renews an expired token automatically
+- renews before expiration using a configurable safety margin
+- defaults `expiration_margin_seconds` to `30`
+- maps invalid clients, invalid scopes, timeouts, and connection failures to
+  connector-specific errors
+
+The OAuth alerts connector sends the cached Bearer token to `/oauth/alerts`,
+follows all available pages, and preserves the pagination safeguards of the
+API Key connector.
+
 ## Connecting webhooks to the incident workflow
 
 The webhook application can receive an alert processor through `create_app()`.
