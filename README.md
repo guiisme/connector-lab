@@ -623,6 +623,64 @@ Correlations and terminal results are stored only in memory and are isolated
 per workflow instance. Restarting the process clears the workflow idempotency
 state.
 
+## Recording structured connector events
+
+`SecurityJobsConnector` accepts an independent operational event recorder.
+When no recorder is provided, a null implementation preserves the original
+connector behavior without producing logs.
+
+Use `LoggingOperationalEventRecorder` to emit structured JSON events through
+the Python standard logging system:
+
+```python
+import logging
+
+from connector_lab.observability.events import (
+    LoggingOperationalEventRecorder,
+)
+
+logger = logging.getLogger(
+    "connector_lab.operational",
+)
+event_recorder = LoggingOperationalEventRecorder(
+    logger=logger,
+)
+
+connector = SecurityJobsConnector(
+    base_url="http://127.0.0.1:8004",
+    api_key="connector-lab-scan-secret",
+    http_client=http_client,
+    event_recorder=event_recorder,
+)
+```
+
+A correlation ID can be supplied explicitly:
+
+```python
+job = await connector.create_and_wait(
+    request,
+    correlation_id="operation-correlation-001",
+)
+```
+
+When omitted, the connector generates a UUID. One logical
+`create_and_wait()` call reuses the same correlation ID for job creation and
+every polling request.
+
+Each structured event contains only:
+
+- `correlation_id`
+- `component`
+- `operation`
+- `outcome`
+- `error_type`
+
+Started and successful operations use the `INFO` level. Failed operations use
+`ERROR` and include the connector-specific exception type.
+
+API keys, bearer tokens, client secrets, targets, external references, request
+headers, and payloads are intentionally excluded from operational events.
+
 ## Connector resilience
 
 The connector retries only responses with status `429 Too Many Requests`.
