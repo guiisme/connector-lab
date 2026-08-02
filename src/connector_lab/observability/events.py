@@ -1,3 +1,5 @@
+import json
+import logging
 from enum import StrEnum
 from typing import Protocol
 
@@ -31,3 +33,27 @@ class NullOperationalEventRecorder:
         event: OperationalEvent,
     ) -> None:
         pass
+
+
+class LoggingOperationalEventRecorder:
+    def __init__(
+        self,
+        *,
+        logger: logging.Logger,
+    ) -> None:
+        self._logger = logger
+
+    def record(
+        self,
+        event: OperationalEvent,
+    ) -> None:
+        payload = json.dumps(
+            event.model_dump(mode="json"),
+            sort_keys=True,
+        )
+
+        if event.outcome is OperationalEventOutcome.FAILED:
+            self._logger.error(payload)
+            return
+
+        self._logger.info(payload)
