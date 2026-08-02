@@ -96,6 +96,56 @@ persisted after the process stops.
 
 The fixed API key is intended only for this educational mock API.
 
+## Running the mock OAuth 2.0 API
+
+Start the OAuth development server:
+
+```bash
+uv run uvicorn connector_lab.mock_oauth_api.app:app \
+  --host 127.0.0.1 \
+  --port 8003
+```
+
+The interactive API documentation is available at:
+
+- <http://127.0.0.1:8003/docs>
+
+Request an access token using the Client Credentials flow:
+
+```bash
+curl \
+  -X POST \
+  -u "connector-lab-client:connector-lab-client-secret" \
+  -H "Content-Type: application/x-www-form-urlencoded" \
+  -d "grant_type=client_credentials" \
+  -d "scope=alerts:read" \
+  http://127.0.0.1:8003/oauth/token
+```
+
+A successful request returns:
+
+```json
+{
+  "access_token": "connector-lab-access-token",
+  "token_type": "Bearer",
+  "expires_in": 300,
+  "scope": "alerts:read"
+}
+```
+
+The mock authorization server:
+
+- authenticates clients with HTTP Basic credentials
+- supports only the `client_credentials` grant
+- accepts the `alerts:read` scope
+- returns OAuth-compatible `invalid_client`, `unsupported_grant_type`, and
+  `invalid_scope` errors
+
+The access token and credentials are deterministic and intended only for this
+educational lab. The `expires_in` value represents the token lifetime that
+connectors will use in later exercises; the mock server does not persist or
+actively revoke issued tokens.
+
 ## Using the ITSM connector
 
 With the mock ITSM API running, create an incident through the connector:
