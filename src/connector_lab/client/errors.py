@@ -16,3 +16,7 @@ class ConnectorConnectionError(Exception):
 
 class ConnectorRateLimitError(Exception):
     """Raised when rate-limit retries are exhausted."""
+
+
+class ConnectorAuthorizationError(Exception):
+    """Raised when connector credentials lack required authorization."""
