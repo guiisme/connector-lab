@@ -10,6 +10,10 @@ from httpx import (
     Response,
 )
 
+from connector_lab.client.errors import (
+    ConnectorAuthenticationError,
+    ConnectorAuthorizationError,
+)
 from connector_lab.client.oauth_models import OAuthToken
 from connector_lab.client.oauth_token_provider import (
     OAuthTokenProvider,
@@ -211,3 +215,58 @@ async def test_token_provider_renews_with_expiration_margin() -> None:
     assert cached_token is first_token
     assert renewed_token.access_token == "margin-token-2"
     assert renewed_token is not first_token
+
+
+@pytest.mark.parametrize(
+    (
+        "status_code",
+        "oauth_error",
+        "expected_error",
+        "expected_message",
+    ),
+    [
+        (
+            401,
+            "invalid_client",
+            ConnectorAuthenticationError,
+            "OAuth client authentication failed",
+        ),
+        (
+            400,
+            "invalid_scope",
+            ConnectorAuthorizationError,
+            "OAuth scope authorization failed",
+        ),
+    ],
+)
+@pytest.mark.asyncio
+async def test_token_provider_maps_oauth_errors(
+    status_code: int,
+    oauth_error: str,
+    expected_error: type[Exception],
+    expected_message: str,
+) -> None:
+    def handle_token_error(request: Request) -> Response:
+        return Response(
+            status_code=status_code,
+            json={
+                "error": oauth_error,
+            },
+        )
+
+    transport = MockTransport(handle_token_error)
+
+    async with AsyncClient(transport=transport) as http_client:
+        provider = OAuthTokenProvider(
+            token_url="https://mock-oauth.local/oauth/token",
+            client_id="connector-lab-client",
+            client_secret="connector-lab-client-secret",
+            scope="alerts:read",
+            http_client=http_client,
+        )
+
+        with pytest.raises(
+            expected_error,
+            match=expected_message,
+        ):
+            await provider.get_token()

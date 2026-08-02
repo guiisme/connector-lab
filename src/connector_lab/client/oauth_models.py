@@ -8,3 +8,7 @@ class OAuthToken(BaseModel):
     token_type: Literal["Bearer"]
     expires_in: int = Field(gt=0)
     scope: str
+
+
+class OAuthErrorResponse(BaseModel):
+    error: str

@@ -1,9 +1,20 @@
 from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
 
-from httpx import AsyncClient, BasicAuth
+from httpx import (
+    AsyncClient,
+    BasicAuth,
+    HTTPStatusError,
+)
 
-from connector_lab.client.oauth_models import OAuthToken
+from connector_lab.client.errors import (
+    ConnectorAuthenticationError,
+    ConnectorAuthorizationError,
+)
+from connector_lab.client.oauth_models import (
+    OAuthErrorResponse,
+    OAuthToken,
+)
 
 NowProvider = Callable[[], datetime]
 DEFAULT_EXPIRATION_MARGIN_SECONDS = 30
@@ -61,7 +72,25 @@ class OAuthTokenProvider:
                 password=self._client_secret,
             ),
         )
-        response.raise_for_status()
+
+        try:
+            response.raise_for_status()
+        except HTTPStatusError as error:
+            oauth_error = OAuthErrorResponse.model_validate(
+                error.response.json(),
+            )
+
+            if oauth_error.error == "invalid_client":
+                raise ConnectorAuthenticationError(
+                    "OAuth client authentication failed",
+                ) from error
+
+            if oauth_error.error == "invalid_scope":
+                raise ConnectorAuthorizationError(
+                    "OAuth scope authorization failed",
+                ) from error
+
+            raise
 
         token = OAuthToken.model_validate(
             response.json(),
