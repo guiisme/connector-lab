@@ -1,7 +1,9 @@
 import pytest
 from httpx import (
     AsyncClient,
+    ConnectError,
     MockTransport,
+    ReadTimeout,
     Request,
     Response,
 )
@@ -9,6 +11,8 @@ from httpx import (
 from connector_lab.client.errors import (
     ConnectorAuthenticationError,
     ConnectorAuthorizationError,
+    ConnectorConnectionError,
+    ConnectorTimeoutError,
 )
 from connector_lab.client.oauth_alerts_connector import (
     OAuthAlertsConnector,
@@ -214,5 +218,53 @@ async def test_oauth_connector_maps_resource_authorization_failures(
         with pytest.raises(
             expected_error,
             match=expected_message,
+        ):
+            await connector.list_alerts()
+
+
+@pytest.mark.asyncio
+async def test_oauth_connector_maps_resource_timeout() -> None:
+    def handle_timeout(request: Request) -> Response:
+        raise ReadTimeout(
+            "OAuth alerts API timed out",
+            request=request,
+        )
+
+    transport = MockTransport(handle_timeout)
+
+    async with AsyncClient(transport=transport) as http_client:
+        connector = OAuthAlertsConnector(
+            base_url="https://mock-cyber.local",
+            token_provider=StaticTokenProvider(),
+            http_client=http_client,
+        )
+
+        with pytest.raises(
+            ConnectorTimeoutError,
+            match="OAuth alerts request timed out",
+        ):
+            await connector.list_alerts()
+
+
+@pytest.mark.asyncio
+async def test_oauth_connector_maps_resource_connection_failure() -> None:
+    def handle_connection_failure(request: Request) -> Response:
+        raise ConnectError(
+            "OAuth alerts API is unavailable",
+            request=request,
+        )
+
+    transport = MockTransport(handle_connection_failure)
+
+    async with AsyncClient(transport=transport) as http_client:
+        connector = OAuthAlertsConnector(
+            base_url="https://mock-cyber.local",
+            token_provider=StaticTokenProvider(),
+            http_client=http_client,
+        )
+
+        with pytest.raises(
+            ConnectorConnectionError,
+            match="OAuth alerts endpoint is unavailable",
         ):
             await connector.list_alerts()
