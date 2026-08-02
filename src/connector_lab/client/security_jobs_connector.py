@@ -188,3 +188,10 @@ class SecurityJobsConnector:
             raise
 
         return response
+
+    async def create_and_wait(
+        self,
+        request: ScanJobCreateRequest,
+    ) -> ScanJobStatusResponse:
+        created_job = await self.create_job(request)
+        return await self.wait_for_job(created_job.job_id)

@@ -398,3 +398,81 @@ async def test_security_jobs_connector_maps_connection_failure() -> None:
             match="Security jobs endpoint is unavailable",
         ):
             await connector.get_job("SCAN-0001")
+
+
+@pytest.mark.asyncio
+async def test_create_and_wait_creates_job_and_awaits_completion() -> None:
+    requested_methods: list[str] = []
+    sleep_delays: list[float] = []
+    status_requests = 0
+
+    async def fake_sleep(delay: float) -> None:
+        sleep_delays.append(delay)
+
+    def handle_request(request: Request) -> Response:
+        nonlocal status_requests
+        requested_methods.append(request.method)
+
+        if request.method == "POST":
+            return Response(
+                status_code=202,
+                json={
+                    "job_id": "SCAN-0001",
+                    "external_reference": "operation-complete",
+                    "status": "pending",
+                },
+            )
+
+        status_requests += 1
+
+        if status_requests == 1:
+            return Response(
+                status_code=200,
+                json={
+                    "job_id": "SCAN-0001",
+                    "external_reference": "operation-complete",
+                    "status": "running",
+                },
+            )
+
+        return Response(
+            status_code=200,
+            json={
+                "job_id": "SCAN-0001",
+                "external_reference": "operation-complete",
+                "status": "completed",
+                "result": {
+                    "total_findings": 3,
+                    "critical_findings": 1,
+                    "high_findings": 2,
+                },
+            },
+        )
+
+    transport = MockTransport(handle_request)
+
+    async with AsyncClient(transport=transport) as http_client:
+        connector = SecurityJobsConnector(
+            base_url="https://mock-scan.local",
+            api_key="connector-lab-scan-secret",
+            http_client=http_client,
+            poll_interval_seconds=1.5,
+            sleep_func=fake_sleep,
+        )
+        request = ScanJobCreateRequest(
+            external_reference="operation-complete",
+            target="server.example.com",
+            scan_type=ScanType.VULNERABILITY,
+        )
+
+        job = await connector.create_and_wait(request)
+
+    assert requested_methods == [
+        "POST",
+        "GET",
+        "GET",
+    ]
+    assert sleep_delays == [1.5]
+    assert job.status is ScanJobStatus.COMPLETED
+    assert job.result is not None
+    assert job.result.total_findings == 3
