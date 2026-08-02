@@ -476,3 +476,46 @@ async def test_create_and_wait_creates_job_and_awaits_completion() -> None:
     assert job.status is ScanJobStatus.COMPLETED
     assert job.result is not None
     assert job.result.total_findings == 3
+
+
+@pytest.mark.parametrize(
+    (
+        "poll_interval_seconds",
+        "poll_timeout_seconds",
+        "expected_message",
+    ),
+    [
+        (
+            -1.0,
+            60.0,
+            "poll_interval_seconds must be zero or greater",
+        ),
+        (
+            1.0,
+            -1.0,
+            "poll_timeout_seconds must be zero or greater",
+        ),
+    ],
+)
+@pytest.mark.asyncio
+async def test_security_jobs_connector_rejects_invalid_polling_configuration(
+    poll_interval_seconds: float,
+    poll_timeout_seconds: float,
+    expected_message: str,
+) -> None:
+    transport = MockTransport(
+        lambda request: Response(status_code=500),
+    )
+
+    async with AsyncClient(transport=transport) as http_client:
+        with pytest.raises(
+            ValueError,
+            match=expected_message,
+        ):
+            SecurityJobsConnector(
+                base_url="https://mock-scan.local",
+                api_key="connector-lab-scan-secret",
+                http_client=http_client,
+                poll_interval_seconds=poll_interval_seconds,
+                poll_timeout_seconds=poll_timeout_seconds,
+            )
