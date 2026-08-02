@@ -196,7 +196,10 @@ class SecurityJobsConnector:
     async def wait_for_job(
         self,
         job_id: str,
+        *,
+        correlation_id: str | None = None,
     ) -> ScanJobStatusResponse:
+        resolved_correlation_id = correlation_id or self._correlation_id_provider()
         started_at = self._now_provider()
 
         while True:
@@ -207,7 +210,10 @@ class SecurityJobsConnector:
                     "Security job polling timed out",
                 )
 
-            job = await self.get_job(job_id)
+            job = await self.get_job(
+                job_id,
+                correlation_id=resolved_correlation_id,
+            )
 
             if job.status is ScanJobStatus.COMPLETED:
                 return job
@@ -314,6 +320,16 @@ class SecurityJobsConnector:
     async def create_and_wait(
         self,
         request: ScanJobCreateRequest,
+        *,
+        correlation_id: str | None = None,
     ) -> ScanJobStatusResponse:
-        created_job = await self.create_job(request)
-        return await self.wait_for_job(created_job.job_id)
+        resolved_correlation_id = correlation_id or self._correlation_id_provider()
+        created_job = await self.create_job(
+            request,
+            correlation_id=resolved_correlation_id,
+        )
+
+        return await self.wait_for_job(
+            created_job.job_id,
+            correlation_id=resolved_correlation_id,
+        )

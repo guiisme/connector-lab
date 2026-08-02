@@ -287,3 +287,77 @@ async def test_job_operation_records_correlated_success_events(
             outcome=OperationalEventOutcome.SUCCEEDED,
         ),
     ]
+
+
+@pytest.mark.asyncio
+async def test_create_and_wait_reuses_one_generated_correlation_id() -> None:
+    generated_ids = 0
+    status_requests = 0
+
+    def generate_correlation_id() -> str:
+        nonlocal generated_ids
+        generated_ids += 1
+        return f"generated-correlation-{generated_ids}"
+
+    async def fake_sleep(delay: float) -> None:
+        pass
+
+    def handle_request(request: Request) -> Response:
+        nonlocal status_requests
+
+        if request.method == "POST":
+            return Response(
+                status_code=202,
+                json={
+                    "job_id": "SCAN-0001",
+                    "external_reference": "operation-001",
+                    "status": "pending",
+                },
+            )
+
+        status_requests += 1
+        status_value = "running" if status_requests == 1 else "completed"
+
+        return Response(
+            status_code=200,
+            json={
+                "job_id": "SCAN-0001",
+                "external_reference": "operation-001",
+                "status": status_value,
+            },
+        )
+
+    recorder = RecordingEventRecorder()
+    transport = MockTransport(handle_request)
+
+    async with AsyncClient(transport=transport) as http_client:
+        connector = SecurityJobsConnector(
+            base_url="https://mock-scan.local",
+            api_key="connector-lab-scan-secret",
+            http_client=http_client,
+            poll_interval_seconds=0,
+            sleep_func=fake_sleep,
+            event_recorder=recorder,
+            correlation_id_provider=generate_correlation_id,
+        )
+
+        await connector.create_and_wait(
+            ScanJobCreateRequest(
+                external_reference="operation-001",
+                target="server.example.com",
+                scan_type=ScanType.VULNERABILITY,
+            ),
+        )
+
+    assert generated_ids == 1
+    assert [event.operation for event in recorder.events] == [
+        "create_job",
+        "create_job",
+        "get_job",
+        "get_job",
+        "get_job",
+        "get_job",
+    ]
+    assert {event.correlation_id for event in recorder.events} == {
+        "generated-correlation-1"
+    }
