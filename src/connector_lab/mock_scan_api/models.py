@@ -19,6 +19,7 @@ class ScanJobCreateRequest(BaseModel):
     external_reference: str = Field(min_length=1)
     target: str = Field(min_length=1)
     scan_type: ScanType
+    simulate_failure: bool = False
 
 
 class ScanJobResponse(BaseModel):
@@ -35,3 +36,4 @@ class ScanJobResult(BaseModel):
 
 class ScanJobStatusResponse(ScanJobResponse):
     result: ScanJobResult | None = None
+    error: str | None = None

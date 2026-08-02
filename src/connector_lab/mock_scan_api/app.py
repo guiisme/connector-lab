@@ -76,7 +76,11 @@ def create_app() -> FastAPI:
             job.status = ScanJobStatus.RUNNING
             job.status_requests += 1
         elif job.status is ScanJobStatus.RUNNING:
-            job.status = ScanJobStatus.COMPLETED
+            if job.request.simulate_failure:
+                job.status = ScanJobStatus.FAILED
+            else:
+                job.status = ScanJobStatus.COMPLETED
+
             job.status_requests += 1
 
         result: ScanJobResult | None = None
@@ -88,11 +92,17 @@ def create_app() -> FastAPI:
                 high_findings=2,
             )
 
+        error_message: str | None = None
+
+        if job.status is ScanJobStatus.FAILED:
+            error_message = "Simulated scan failure"
+
         return ScanJobStatusResponse(
             job_id=job_id,
             external_reference=(job.request.external_reference),
             status=job.status,
             result=result,
+            error=error_message,
         )
 
     @api.delete(

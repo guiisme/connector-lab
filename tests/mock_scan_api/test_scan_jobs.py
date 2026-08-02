@@ -134,3 +134,55 @@ async def test_active_scan_job_can_be_cancelled() -> None:
     assert cancel_response.json() == expected_cancelled
     assert stable_response.status_code == 200
     assert stable_response.json() == expected_cancelled
+
+
+@pytest.mark.asyncio
+async def test_scan_job_progresses_to_stable_failed_state() -> None:
+    test_app = create_app()
+    transport = ASGITransport(app=test_app)
+    headers = {
+        "X-API-Key": "connector-lab-scan-secret",
+    }
+
+    async with AsyncClient(
+        transport=transport,
+        base_url="http://test",
+    ) as client:
+        create_response = await client.post(
+            "/scan-jobs",
+            headers=headers,
+            json={
+                "external_reference": "operation-failed",
+                "target": "legacy.example.com",
+                "scan_type": "vulnerability",
+                "simulate_failure": True,
+            },
+        )
+        job_id = create_response.json()["job_id"]
+
+        running_response = await client.get(
+            f"/scan-jobs/{job_id}",
+            headers=headers,
+        )
+        failed_response = await client.get(
+            f"/scan-jobs/{job_id}",
+            headers=headers,
+        )
+        stable_response = await client.get(
+            f"/scan-jobs/{job_id}",
+            headers=headers,
+        )
+
+    assert running_response.json()["status"] == "running"
+
+    expected_failed = {
+        "job_id": "SCAN-0001",
+        "external_reference": "operation-failed",
+        "status": "failed",
+        "error": "Simulated scan failure",
+    }
+
+    assert failed_response.status_code == 200
+    assert failed_response.json() == expected_failed
+    assert stable_response.status_code == 200
+    assert stable_response.json() == expected_failed
