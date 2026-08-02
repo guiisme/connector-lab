@@ -326,3 +326,20 @@ async def test_token_provider_maps_connection_failure() -> None:
             match="OAuth token endpoint is unavailable",
         ):
             await provider.get_token()
+
+
+@pytest.mark.asyncio
+async def test_token_provider_rejects_negative_expiration_margin() -> None:
+    async with AsyncClient() as http_client:
+        with pytest.raises(
+            ValueError,
+            match=("expiration_margin_seconds must be zero or greater"),
+        ):
+            OAuthTokenProvider(
+                token_url="https://mock-oauth.local/oauth/token",
+                client_id="connector-lab-client",
+                client_secret="connector-lab-client-secret",
+                scope="alerts:read",
+                http_client=http_client,
+                expiration_margin_seconds=-1,
+            )
