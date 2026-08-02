@@ -268,6 +268,53 @@ instance. Restarting the process clears the event idempotency state.
 
 The fixed webhook secret is intended only for this educational lab.
 
+## Connecting webhooks to the incident workflow
+
+The webhook application can receive an alert processor through `create_app()`.
+`AlertToIncidentWorkflow` satisfies this contract without coupling the API to
+the concrete ITSM connector.
+
+```python
+from connector_lab.webhook_api.app import create_app
+from connector_lab.workflows.alert_to_incident import (
+    AlertToIncidentWorkflow,
+)
+
+workflow = AlertToIncidentWorkflow(
+    incident_creator=itsm_connector,
+)
+
+integrated_app = create_app(
+    alert_processor=workflow,
+)
+```
+
+Authenticated webhook payloads are converted explicitly into the independent
+`Alert` client model before processing.
+
+An accepted and newly created incident returns:
+
+```json
+{
+  "event_id": "event-001",
+  "status": "accepted",
+  "alert_id": "alert-001",
+  "incident_id": "INC-0001",
+  "created": true
+}
+```
+
+The integration preserves two idempotency boundaries:
+
+- repeated `event_id`: the webhook API returns `duplicate` without invoking the
+  workflow again
+- new `event_id` with an existing `alert_id`: the workflow returns the existing
+  incident correlation with `created=false`
+
+Authentication failures never invoke the alert processor. Event IDs are marked
+as processed only after the processor completes successfully, allowing a
+failed delivery to be retried.
+
 ## Connector resilience
 
 The connector retries only responses with status `429 Too Many Requests`.
