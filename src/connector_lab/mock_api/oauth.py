@@ -24,6 +24,8 @@ def create_bearer_token_dependency(
     *,
     expires_at: datetime,
     now_provider: NowProvider,
+    token_scopes: frozenset[str],
+    required_scope: str,
 ) -> BearerTokenDependency:
     def require_bearer_token(
         credentials: Annotated[
@@ -47,6 +49,17 @@ def create_bearer_token_dependency(
                 detail="Access token expired",
                 headers={
                     "WWW-Authenticate": ('Bearer error="invalid_token"'),
+                },
+            )
+
+        if required_scope not in token_scopes:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Insufficient access token scope",
+                headers={
+                    "WWW-Authenticate": (
+                        f'Bearer error="insufficient_scope", scope="{required_scope}"'
+                    ),
                 },
             )
 

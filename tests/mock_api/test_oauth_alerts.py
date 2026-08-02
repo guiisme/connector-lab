@@ -105,3 +105,39 @@ async def test_oauth_alerts_rejects_expired_token() -> None:
     assert response.json() == {
         "detail": "Access token expired",
     }
+
+
+@pytest.mark.asyncio
+async def test_oauth_alerts_rejects_token_without_required_scope() -> None:
+    fixed_now = datetime(
+        2026,
+        8,
+        2,
+        12,
+        0,
+        tzinfo=UTC,
+    )
+    test_app = create_app(
+        now_provider=lambda: fixed_now,
+        token_scopes=frozenset(),
+    )
+    transport = ASGITransport(app=test_app)
+
+    async with AsyncClient(
+        transport=transport,
+        base_url="http://test",
+    ) as client:
+        response = await client.get(
+            "/oauth/alerts",
+            headers={
+                "Authorization": ("Bearer connector-lab-access-token"),
+            },
+        )
+
+    assert response.status_code == 403
+    assert response.headers["WWW-Authenticate"] == (
+        'Bearer error="insufficient_scope", scope="alerts:read"'
+    )
+    assert response.json() == {
+        "detail": "Insufficient access token scope",
+    }

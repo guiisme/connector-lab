@@ -14,7 +14,10 @@ from connector_lab.mock_api.models import (
 from connector_lab.mock_api.oauth import (
     create_bearer_token_dependency,
 )
-from connector_lab.oauth_config import TOKEN_EXPIRES_IN
+from connector_lab.oauth_config import (
+    ALERTS_READ_SCOPE,
+    TOKEN_EXPIRES_IN,
+)
 
 NowProvider = Callable[[], datetime]
 
@@ -62,6 +65,9 @@ def paginate_alerts(
 def create_app(
     *,
     now_provider: NowProvider = utc_now,
+    token_scopes: frozenset[str] = frozenset(
+        {ALERTS_READ_SCOPE},
+    ),
 ) -> FastAPI:
     issued_at = now_provider()
     expires_at = issued_at + timedelta(
@@ -70,6 +76,8 @@ def create_app(
     require_bearer_token = create_bearer_token_dependency(
         expires_at=expires_at,
         now_provider=now_provider,
+        token_scopes=token_scopes,
+        required_scope=ALERTS_READ_SCOPE,
     )
 
     api = FastAPI(
