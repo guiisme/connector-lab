@@ -6,6 +6,7 @@ from httpx import AsyncClient, BasicAuth
 from connector_lab.client.oauth_models import OAuthToken
 
 NowProvider = Callable[[], datetime]
+DEFAULT_EXPIRATION_MARGIN_SECONDS = 30
 
 
 def utc_now() -> datetime:
@@ -22,6 +23,7 @@ class OAuthTokenProvider:
         scope: str,
         http_client: AsyncClient,
         now_provider: NowProvider = utc_now,
+        expiration_margin_seconds: int = (DEFAULT_EXPIRATION_MARGIN_SECONDS),
     ) -> None:
         self._token_url = token_url
         self._client_id = client_id
@@ -29,6 +31,12 @@ class OAuthTokenProvider:
         self._scope = scope
         self._http_client = http_client
         self._now_provider = now_provider
+        if expiration_margin_seconds < 0:
+            raise ValueError(
+                "expiration_margin_seconds must be zero or greater",
+            )
+
+        self._expiration_margin_seconds = expiration_margin_seconds
         self._cached_token: OAuthToken | None = None
         self._expires_at: datetime | None = None
 
@@ -60,7 +68,7 @@ class OAuthTokenProvider:
         )
         self._cached_token = token
         self._expires_at = current_time + timedelta(
-            seconds=token.expires_in,
+            seconds=(token.expires_in - self._expiration_margin_seconds),
         )
 
         return token

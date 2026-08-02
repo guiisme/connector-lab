@@ -158,3 +158,56 @@ async def test_token_provider_renews_expired_token() -> None:
     assert first_token.access_token == "access-token-1"
     assert second_token.access_token == "access-token-2"
     assert first_token is not second_token
+
+
+@pytest.mark.asyncio
+async def test_token_provider_renews_with_expiration_margin() -> None:
+    token_requests = 0
+    current_time = datetime(
+        2026,
+        8,
+        2,
+        12,
+        0,
+        tzinfo=UTC,
+    )
+
+    def handle_token_request(request: Request) -> Response:
+        nonlocal token_requests
+        token_requests += 1
+
+        return Response(
+            status_code=200,
+            json={
+                "access_token": (f"margin-token-{token_requests}"),
+                "token_type": "Bearer",
+                "expires_in": 300,
+                "scope": "alerts:read",
+            },
+        )
+
+    transport = MockTransport(handle_token_request)
+
+    async with AsyncClient(transport=transport) as http_client:
+        provider = OAuthTokenProvider(
+            token_url="https://mock-oauth.local/oauth/token",
+            client_id="connector-lab-client",
+            client_secret="connector-lab-client-secret",
+            scope="alerts:read",
+            http_client=http_client,
+            now_provider=lambda: current_time,
+            expiration_margin_seconds=30,
+        )
+
+        first_token = await provider.get_token()
+
+        current_time += timedelta(seconds=269)
+        cached_token = await provider.get_token()
+
+        current_time += timedelta(seconds=1)
+        renewed_token = await provider.get_token()
+
+    assert token_requests == 2
+    assert cached_token is first_token
+    assert renewed_token.access_token == "margin-token-2"
+    assert renewed_token is not first_token
