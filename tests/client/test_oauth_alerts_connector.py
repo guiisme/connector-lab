@@ -6,12 +6,27 @@ from httpx import (
     Response,
 )
 
+from connector_lab.client.errors import (
+    ConnectorAuthenticationError,
+    ConnectorAuthorizationError,
+)
 from connector_lab.client.oauth_alerts_connector import (
     OAuthAlertsConnector,
 )
+from connector_lab.client.oauth_models import OAuthToken
 from connector_lab.client.oauth_token_provider import (
     OAuthTokenProvider,
 )
+
+
+class StaticTokenProvider:
+    async def get_token(self) -> OAuthToken:
+        return OAuthToken(
+            access_token="static-access-token",
+            token_type="Bearer",
+            expires_in=300,
+            scope="alerts:read",
+        )
 
 
 @pytest.mark.asyncio
@@ -152,3 +167,52 @@ async def test_oauth_connector_reuses_cached_token_between_calls() -> None:
     assert alerts_requests == 2
     assert first_result.total == 0
     assert second_result.total == 0
+
+
+@pytest.mark.parametrize(
+    (
+        "status_code",
+        "expected_error",
+        "expected_message",
+    ),
+    [
+        (
+            401,
+            ConnectorAuthenticationError,
+            "OAuth access token was rejected",
+        ),
+        (
+            403,
+            ConnectorAuthorizationError,
+            "OAuth access token lacks required scope",
+        ),
+    ],
+)
+@pytest.mark.asyncio
+async def test_oauth_connector_maps_resource_authorization_failures(
+    status_code: int,
+    expected_error: type[Exception],
+    expected_message: str,
+) -> None:
+    def handle_resource_failure(request: Request) -> Response:
+        return Response(
+            status_code=status_code,
+            json={
+                "detail": "Resource access rejected",
+            },
+        )
+
+    transport = MockTransport(handle_resource_failure)
+
+    async with AsyncClient(transport=transport) as http_client:
+        connector = OAuthAlertsConnector(
+            base_url="https://mock-cyber.local",
+            token_provider=StaticTokenProvider(),
+            http_client=http_client,
+        )
+
+        with pytest.raises(
+            expected_error,
+            match=expected_message,
+        ):
+            await connector.list_alerts()
