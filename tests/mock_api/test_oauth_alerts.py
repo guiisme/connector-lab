@@ -31,3 +31,34 @@ async def test_oauth_alerts_accepts_valid_bearer_token() -> None:
         "alert-001",
         "alert-002",
     ]
+
+
+@pytest.mark.parametrize(
+    "headers",
+    [
+        None,
+        {"Authorization": "Basic invalid-credentials"},
+        {"Authorization": "Bearer"},
+        {"Authorization": "Bearer unknown-access-token"},
+    ],
+)
+@pytest.mark.asyncio
+async def test_oauth_alerts_rejects_invalid_authentication(
+    headers: dict[str, str] | None,
+) -> None:
+    transport = ASGITransport(app=app)
+
+    async with AsyncClient(
+        transport=transport,
+        base_url="http://test",
+    ) as client:
+        response = await client.get(
+            "/oauth/alerts",
+            headers=headers,
+        )
+
+    assert response.status_code == 401
+    assert response.headers["WWW-Authenticate"] == "Bearer"
+    assert response.json() == {
+        "detail": "Invalid access token",
+    }
