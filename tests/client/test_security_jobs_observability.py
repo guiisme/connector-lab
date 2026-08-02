@@ -212,3 +212,78 @@ async def test_create_job_records_correlated_failure_event(
         outcome=OperationalEventOutcome.FAILED,
         error_type=expected_error_type,
     )
+
+
+@pytest.mark.parametrize(
+    (
+        "operation",
+        "http_method",
+        "response_status",
+    ),
+    [
+        (
+            "get_job",
+            "GET",
+            "completed",
+        ),
+        (
+            "cancel_job",
+            "DELETE",
+            "cancelled",
+        ),
+    ],
+)
+@pytest.mark.asyncio
+async def test_job_operation_records_correlated_success_events(
+    operation: str,
+    http_method: str,
+    response_status: str,
+) -> None:
+    def handle_request(request: Request) -> Response:
+        assert request.method == http_method
+
+        return Response(
+            status_code=200,
+            json={
+                "job_id": "SCAN-0001",
+                "external_reference": "operation-001",
+                "status": response_status,
+            },
+        )
+
+    recorder = RecordingEventRecorder()
+    transport = MockTransport(handle_request)
+
+    async with AsyncClient(transport=transport) as http_client:
+        connector = SecurityJobsConnector(
+            base_url="https://mock-scan.local",
+            api_key="connector-lab-scan-secret",
+            http_client=http_client,
+            event_recorder=recorder,
+        )
+
+        if operation == "get_job":
+            await connector.get_job(
+                "SCAN-0001",
+                correlation_id="correlation-job",
+            )
+        else:
+            await connector.cancel_job(
+                "SCAN-0001",
+                correlation_id="correlation-job",
+            )
+
+    assert recorder.events == [
+        OperationalEvent(
+            correlation_id="correlation-job",
+            component="security_jobs_connector",
+            operation=operation,
+            outcome=OperationalEventOutcome.STARTED,
+        ),
+        OperationalEvent(
+            correlation_id="correlation-job",
+            component="security_jobs_connector",
+            operation=operation,
+            outcome=OperationalEventOutcome.SUCCEEDED,
+        ),
+    ]
