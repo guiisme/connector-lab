@@ -1,6 +1,7 @@
 from asyncio import sleep
 from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime
+from uuid import uuid4
 
 from httpx import (
     AsyncClient,
@@ -24,6 +25,12 @@ from connector_lab.client.scan_models import (
     ScanJobStatus,
     ScanJobStatusResponse,
 )
+from connector_lab.observability.events import (
+    NullOperationalEventRecorder,
+    OperationalEvent,
+    OperationalEventOutcome,
+    OperationalEventRecorder,
+)
 
 DEFAULT_POLL_INTERVAL_SECONDS = 1.0
 DEFAULT_POLL_TIMEOUT_SECONDS = 60.0
@@ -33,6 +40,11 @@ SleepFunc = Callable[
     Awaitable[None],
 ]
 NowProvider = Callable[[], datetime]
+CorrelationIdProvider = Callable[[], str]
+
+
+def new_correlation_id() -> str:
+    return str(uuid4())
 
 
 def utc_now() -> datetime:
@@ -50,6 +62,8 @@ class SecurityJobsConnector:
         poll_timeout_seconds: float = (DEFAULT_POLL_TIMEOUT_SECONDS),
         sleep_func: SleepFunc = sleep,
         now_provider: NowProvider = utc_now,
+        event_recorder: OperationalEventRecorder | None = None,
+        correlation_id_provider: CorrelationIdProvider = (new_correlation_id),
     ) -> None:
         if poll_interval_seconds < 0:
             raise ValueError(
@@ -68,38 +82,124 @@ class SecurityJobsConnector:
         self._poll_timeout_seconds = poll_timeout_seconds
         self._sleep_func = sleep_func
         self._now_provider = now_provider
+        self._event_recorder = (
+            event_recorder
+            if event_recorder is not None
+            else NullOperationalEventRecorder()
+        )
+        self._correlation_id_provider = correlation_id_provider
+
+    def _record_operational_event(
+        self,
+        *,
+        correlation_id: str,
+        operation: str,
+        outcome: OperationalEventOutcome,
+        error_type: str | None = None,
+    ) -> None:
+        self._event_recorder.record(
+            OperationalEvent(
+                correlation_id=correlation_id,
+                component="security_jobs_connector",
+                operation=operation,
+                outcome=outcome,
+                error_type=error_type,
+            ),
+        )
 
     async def create_job(
         self,
         request: ScanJobCreateRequest,
+        *,
+        correlation_id: str | None = None,
     ) -> ScanJobCreateResponse:
-        response = await self._send_request(
-            method="POST",
-            url=f"{self._base_url}/scan-jobs",
-            json_payload=request.model_dump(mode="json"),
+        resolved_correlation_id = correlation_id or self._correlation_id_provider()
+        self._event_recorder.record(
+            OperationalEvent(
+                correlation_id=resolved_correlation_id,
+                component="security_jobs_connector",
+                operation="create_job",
+                outcome=OperationalEventOutcome.STARTED,
+            ),
         )
 
-        return ScanJobCreateResponse.model_validate(
-            response.json(),
+        try:
+            response = await self._send_request(
+                method="POST",
+                url=f"{self._base_url}/scan-jobs",
+                json_payload=request.model_dump(mode="json"),
+            )
+            created_job = ScanJobCreateResponse.model_validate(
+                response.json(),
+            )
+        except Exception as error:
+            self._event_recorder.record(
+                OperationalEvent(
+                    correlation_id=resolved_correlation_id,
+                    component="security_jobs_connector",
+                    operation="create_job",
+                    outcome=OperationalEventOutcome.FAILED,
+                    error_type=type(error).__name__,
+                ),
+            )
+            raise
+
+        self._event_recorder.record(
+            OperationalEvent(
+                correlation_id=resolved_correlation_id,
+                component="security_jobs_connector",
+                operation="create_job",
+                outcome=OperationalEventOutcome.SUCCEEDED,
+            ),
         )
+
+        return created_job
 
     async def get_job(
         self,
         job_id: str,
+        *,
+        correlation_id: str | None = None,
     ) -> ScanJobStatusResponse:
-        response = await self._send_request(
-            method="GET",
-            url=f"{self._base_url}/scan-jobs/{job_id}",
+        resolved_correlation_id = correlation_id or self._correlation_id_provider()
+        self._record_operational_event(
+            correlation_id=resolved_correlation_id,
+            operation="get_job",
+            outcome=OperationalEventOutcome.STARTED,
         )
 
-        return ScanJobStatusResponse.model_validate(
-            response.json(),
+        try:
+            response = await self._send_request(
+                method="GET",
+                url=f"{self._base_url}/scan-jobs/{job_id}",
+            )
+            job = ScanJobStatusResponse.model_validate(
+                response.json(),
+            )
+        except Exception as error:
+            self._record_operational_event(
+                correlation_id=resolved_correlation_id,
+                operation="get_job",
+                outcome=OperationalEventOutcome.FAILED,
+                error_type=type(error).__name__,
+            )
+            raise
+
+        self._record_operational_event(
+            correlation_id=resolved_correlation_id,
+            operation="get_job",
+            outcome=OperationalEventOutcome.SUCCEEDED,
         )
+
+        return job
 
     async def wait_for_job(
         self,
         job_id: str,
+        *,
+        correlation_id: str | None = None,
     ) -> ScanJobStatusResponse:
+        resolved_correlation_id = correlation_id or self._correlation_id_provider()
         started_at = self._now_provider()
 
         while True:
@@ -110,7 +210,10 @@ class SecurityJobsConnector:
                     "Security job polling timed out",
                 )
 
-            job = await self.get_job(job_id)
+            job = await self.get_job(
+                job_id,
+                correlation_id=resolved_correlation_id,
+            )
 
             if job.status is ScanJobStatus.COMPLETED:
                 return job
@@ -133,15 +236,40 @@ class SecurityJobsConnector:
     async def cancel_job(
         self,
         job_id: str,
+        *,
+        correlation_id: str | None = None,
     ) -> ScanJobStatusResponse:
-        response = await self._send_request(
-            method="DELETE",
-            url=f"{self._base_url}/scan-jobs/{job_id}",
+        resolved_correlation_id = correlation_id or self._correlation_id_provider()
+        self._record_operational_event(
+            correlation_id=resolved_correlation_id,
+            operation="cancel_job",
+            outcome=OperationalEventOutcome.STARTED,
         )
 
-        return ScanJobStatusResponse.model_validate(
-            response.json(),
+        try:
+            response = await self._send_request(
+                method="DELETE",
+                url=f"{self._base_url}/scan-jobs/{job_id}",
+            )
+            job = ScanJobStatusResponse.model_validate(
+                response.json(),
+            )
+        except Exception as error:
+            self._record_operational_event(
+                correlation_id=resolved_correlation_id,
+                operation="cancel_job",
+                outcome=OperationalEventOutcome.FAILED,
+                error_type=type(error).__name__,
+            )
+            raise
+
+        self._record_operational_event(
+            correlation_id=resolved_correlation_id,
+            operation="cancel_job",
+            outcome=OperationalEventOutcome.SUCCEEDED,
         )
+
+        return job
 
     async def _send_request(
         self,
@@ -192,6 +320,16 @@ class SecurityJobsConnector:
     async def create_and_wait(
         self,
         request: ScanJobCreateRequest,
+        *,
+        correlation_id: str | None = None,
     ) -> ScanJobStatusResponse:
-        created_job = await self.create_job(request)
-        return await self.wait_for_job(created_job.job_id)
+        resolved_correlation_id = correlation_id or self._correlation_id_provider()
+        created_job = await self.create_job(
+            request,
+            correlation_id=resolved_correlation_id,
+        )
+
+        return await self.wait_for_job(
+            created_job.job_id,
+            correlation_id=resolved_correlation_id,
+        )
