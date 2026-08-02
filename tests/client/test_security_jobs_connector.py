@@ -223,3 +223,35 @@ async def test_wait_for_job_stops_after_global_timeout() -> None:
 
     assert status_requests == 1
     assert sleep_delays == [2.0]
+
+
+@pytest.mark.asyncio
+async def test_cancel_job_returns_typed_cancelled_status() -> None:
+    def handle_cancel_request(request: Request) -> Response:
+        assert request.method == "DELETE"
+        assert str(request.url) == ("https://mock-scan.local/scan-jobs/SCAN-0001")
+        assert request.headers["X-API-Key"] == ("connector-lab-scan-secret")
+
+        return Response(
+            status_code=200,
+            json={
+                "job_id": "SCAN-0001",
+                "external_reference": "operation-cancel",
+                "status": "cancelled",
+            },
+        )
+
+    transport = MockTransport(handle_cancel_request)
+
+    async with AsyncClient(transport=transport) as http_client:
+        connector = SecurityJobsConnector(
+            base_url="https://mock-scan.local",
+            api_key="connector-lab-scan-secret",
+            http_client=http_client,
+        )
+
+        job = await connector.cancel_job("SCAN-0001")
+
+    assert isinstance(job, ScanJobStatusResponse)
+    assert job.job_id == "SCAN-0001"
+    assert job.status is ScanJobStatus.CANCELLED

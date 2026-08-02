@@ -118,3 +118,19 @@ class SecurityJobsConnector:
             await self._sleep_func(
                 self._poll_interval_seconds,
             )
+
+    async def cancel_job(
+        self,
+        job_id: str,
+    ) -> ScanJobStatusResponse:
+        response = await self._http_client.delete(
+            f"{self._base_url}/scan-jobs/{job_id}",
+            headers={
+                "X-API-Key": self._api_key,
+            },
+        )
+        response.raise_for_status()
+
+        return ScanJobStatusResponse.model_validate(
+            response.json(),
+        )
