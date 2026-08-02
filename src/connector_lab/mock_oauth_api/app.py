@@ -18,10 +18,13 @@ from connector_lab.mock_oauth_api.auth import (
 )
 from connector_lab.mock_oauth_api.errors import OAuthError
 from connector_lab.mock_oauth_api.models import TokenResponse
+from connector_lab.oauth_config import (
+    ACCESS_TOKEN,
+    ALERTS_READ_SCOPE,
+    TOKEN_EXPIRES_IN,
+)
 
-ACCESS_TOKEN = "connector-lab-access-token"
-TOKEN_EXPIRES_IN = 300
-ALLOWED_SCOPES = {"alerts:read"}
+ALLOWED_SCOPES = {ALERTS_READ_SCOPE}
 
 basic_auth = HTTPBasic(auto_error=False)
 
