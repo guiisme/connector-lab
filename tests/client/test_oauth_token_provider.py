@@ -5,7 +5,9 @@ from urllib.parse import parse_qs
 import pytest
 from httpx import (
     AsyncClient,
+    ConnectError,
     MockTransport,
+    ReadTimeout,
     Request,
     Response,
 )
@@ -13,6 +15,8 @@ from httpx import (
 from connector_lab.client.errors import (
     ConnectorAuthenticationError,
     ConnectorAuthorizationError,
+    ConnectorConnectionError,
+    ConnectorTimeoutError,
 )
 from connector_lab.client.oauth_models import OAuthToken
 from connector_lab.client.oauth_token_provider import (
@@ -268,5 +272,57 @@ async def test_token_provider_maps_oauth_errors(
         with pytest.raises(
             expected_error,
             match=expected_message,
+        ):
+            await provider.get_token()
+
+
+@pytest.mark.asyncio
+async def test_token_provider_maps_timeout_failure() -> None:
+    def handle_timeout(request: Request) -> Response:
+        raise ReadTimeout(
+            "OAuth server timed out",
+            request=request,
+        )
+
+    transport = MockTransport(handle_timeout)
+
+    async with AsyncClient(transport=transport) as http_client:
+        provider = OAuthTokenProvider(
+            token_url="https://mock-oauth.local/oauth/token",
+            client_id="connector-lab-client",
+            client_secret="connector-lab-client-secret",
+            scope="alerts:read",
+            http_client=http_client,
+        )
+
+        with pytest.raises(
+            ConnectorTimeoutError,
+            match="OAuth token request timed out",
+        ):
+            await provider.get_token()
+
+
+@pytest.mark.asyncio
+async def test_token_provider_maps_connection_failure() -> None:
+    def handle_connection_failure(request: Request) -> Response:
+        raise ConnectError(
+            "OAuth server is unavailable",
+            request=request,
+        )
+
+    transport = MockTransport(handle_connection_failure)
+
+    async with AsyncClient(transport=transport) as http_client:
+        provider = OAuthTokenProvider(
+            token_url="https://mock-oauth.local/oauth/token",
+            client_id="connector-lab-client",
+            client_secret="connector-lab-client-secret",
+            scope="alerts:read",
+            http_client=http_client,
+        )
+
+        with pytest.raises(
+            ConnectorConnectionError,
+            match="OAuth token endpoint is unavailable",
         ):
             await provider.get_token()

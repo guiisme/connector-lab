@@ -4,12 +4,16 @@ from datetime import UTC, datetime, timedelta
 from httpx import (
     AsyncClient,
     BasicAuth,
+    ConnectError,
     HTTPStatusError,
+    TimeoutException,
 )
 
 from connector_lab.client.errors import (
     ConnectorAuthenticationError,
     ConnectorAuthorizationError,
+    ConnectorConnectionError,
+    ConnectorTimeoutError,
 )
 from connector_lab.client.oauth_models import (
     OAuthErrorResponse,
@@ -61,17 +65,26 @@ class OAuthTokenProvider:
         ):
             return self._cached_token
 
-        response = await self._http_client.post(
-            self._token_url,
-            data={
-                "grant_type": "client_credentials",
-                "scope": self._scope,
-            },
-            auth=BasicAuth(
-                username=self._client_id,
-                password=self._client_secret,
-            ),
-        )
+        try:
+            response = await self._http_client.post(
+                self._token_url,
+                data={
+                    "grant_type": "client_credentials",
+                    "scope": self._scope,
+                },
+                auth=BasicAuth(
+                    username=self._client_id,
+                    password=self._client_secret,
+                ),
+            )
+        except TimeoutException as error:
+            raise ConnectorTimeoutError(
+                "OAuth token request timed out",
+            ) from error
+        except ConnectError as error:
+            raise ConnectorConnectionError(
+                "OAuth token endpoint is unavailable",
+            ) from error
 
         try:
             response.raise_for_status()
