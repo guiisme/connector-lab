@@ -4,8 +4,15 @@ import json
 from datetime import UTC, datetime
 
 import pytest
-from httpx import ASGITransport, AsyncClient
+from httpx import (
+    ASGITransport,
+    AsyncClient,
+    MockTransport,
+    Request,
+    Response,
+)
 
+from connector_lab.client.itsm_connector import ITSMConnector
 from connector_lab.client.models import (
     Alert,
     AlertSeverity,
@@ -14,6 +21,7 @@ from connector_lab.client.models import (
 from connector_lab.webhook_api.app import create_app
 from connector_lab.workflows.alert_to_incident import (
     AlertIncidentResult,
+    AlertToIncidentWorkflow,
 )
 
 WEBHOOK_SECRET = "connector-lab-webhook-secret"
@@ -225,3 +233,123 @@ async def test_authentication_failure_does_not_invoke_processor() -> None:
 
     assert response.status_code == 401
     assert processor.alerts == []
+
+
+@pytest.mark.asyncio
+async def test_webhook_creates_one_idempotent_itsm_incident() -> None:
+    fixed_now = datetime(
+        2026,
+        8,
+        2,
+        0,
+        0,
+        tzinfo=UTC,
+    )
+    timestamp = str(int(fixed_now.timestamp()))
+    itsm_requests: list[Request] = []
+
+    def handle_itsm_request(request: Request) -> Response:
+        itsm_requests.append(request)
+
+        return Response(
+            status_code=201,
+            json={
+                "incident_id": "INC-0001",
+                "external_reference": "alert-001",
+                "status": "new",
+            },
+        )
+
+    def event_payload(event_id: str) -> bytes:
+        return json.dumps(
+            {
+                "event_id": event_id,
+                "event_type": "alert.detected",
+                "alert": {
+                    "id": "alert-001",
+                    "title": "Suspicious PowerShell execution",
+                    "severity": "high",
+                    "status": "open",
+                    "detected_at": "2026-08-01T23:59:00Z",
+                },
+            },
+            separators=(",", ":"),
+        ).encode()
+
+    itsm_transport = MockTransport(handle_itsm_request)
+
+    async with AsyncClient(
+        transport=itsm_transport,
+    ) as itsm_http_client:
+        itsm_connector = ITSMConnector(
+            base_url="https://mock-itsm.local",
+            api_key="connector-lab-itsm-secret",
+            http_client=itsm_http_client,
+        )
+        workflow = AlertToIncidentWorkflow(
+            incident_creator=itsm_connector,
+        )
+        test_app = create_app(
+            now_provider=lambda: fixed_now,
+            alert_processor=workflow,
+        )
+        webhook_transport = ASGITransport(app=test_app)
+
+        async with AsyncClient(
+            transport=webhook_transport,
+            base_url="http://test",
+        ) as webhook_client:
+            first_payload = event_payload("event-001")
+            first_headers = {
+                "Content-Type": "application/json",
+                "X-Webhook-Timestamp": timestamp,
+                "X-Webhook-Signature": sign_payload(
+                    first_payload,
+                    timestamp,
+                ),
+            }
+            first_response = await webhook_client.post(
+                "/webhooks/alerts",
+                content=first_payload,
+                headers=first_headers,
+            )
+            duplicate_response = await webhook_client.post(
+                "/webhooks/alerts",
+                content=first_payload,
+                headers=first_headers,
+            )
+
+            second_payload = event_payload("event-002")
+            second_response = await webhook_client.post(
+                "/webhooks/alerts",
+                content=second_payload,
+                headers={
+                    "Content-Type": "application/json",
+                    "X-Webhook-Timestamp": timestamp,
+                    "X-Webhook-Signature": sign_payload(
+                        second_payload,
+                        timestamp,
+                    ),
+                },
+            )
+
+    assert len(itsm_requests) == 1
+
+    assert first_response.json() == {
+        "event_id": "event-001",
+        "status": "accepted",
+        "alert_id": "alert-001",
+        "incident_id": "INC-0001",
+        "created": True,
+    }
+    assert duplicate_response.json() == {
+        "event_id": "event-001",
+        "status": "duplicate",
+    }
+    assert second_response.json() == {
+        "event_id": "event-002",
+        "status": "accepted",
+        "alert_id": "alert-001",
+        "incident_id": "INC-0001",
+        "created": False,
+    }
