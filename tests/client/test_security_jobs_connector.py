@@ -9,7 +9,11 @@ from httpx import (
     Response,
 )
 
-from connector_lab.client.errors import ConnectorJobTimeoutError
+from connector_lab.client.errors import (
+    ConnectorJobCancelledError,
+    ConnectorJobFailedError,
+    ConnectorJobTimeoutError,
+)
 from connector_lab.client.scan_models import (
     ScanJobCreateRequest,
     ScanJobStatus,
@@ -255,3 +259,63 @@ async def test_cancel_job_returns_typed_cancelled_status() -> None:
     assert isinstance(job, ScanJobStatusResponse)
     assert job.job_id == "SCAN-0001"
     assert job.status is ScanJobStatus.CANCELLED
+
+
+@pytest.mark.parametrize(
+    (
+        "status_value",
+        "error_message",
+        "expected_error",
+        "expected_message",
+    ),
+    [
+        (
+            "failed",
+            "Simulated scan failure",
+            ConnectorJobFailedError,
+            "Security job failed: Simulated scan failure",
+        ),
+        (
+            "cancelled",
+            None,
+            ConnectorJobCancelledError,
+            "Security job was cancelled",
+        ),
+    ],
+)
+@pytest.mark.asyncio
+async def test_wait_for_job_maps_unsuccessful_terminal_states(
+    status_value: str,
+    error_message: str | None,
+    expected_error: type[Exception],
+    expected_message: str,
+) -> None:
+    def handle_terminal_status(request: Request) -> Response:
+        payload: dict[str, object] = {
+            "job_id": "SCAN-0001",
+            "external_reference": "operation-terminal",
+            "status": status_value,
+        }
+
+        if error_message is not None:
+            payload["error"] = error_message
+
+        return Response(
+            status_code=200,
+            json=payload,
+        )
+
+    transport = MockTransport(handle_terminal_status)
+
+    async with AsyncClient(transport=transport) as http_client:
+        connector = SecurityJobsConnector(
+            base_url="https://mock-scan.local",
+            api_key="connector-lab-scan-secret",
+            http_client=http_client,
+        )
+
+        with pytest.raises(
+            expected_error,
+            match=expected_message,
+        ):
+            await connector.wait_for_job("SCAN-0001")

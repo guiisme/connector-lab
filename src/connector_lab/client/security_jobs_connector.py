@@ -5,6 +5,8 @@ from datetime import UTC, datetime
 from httpx import AsyncClient
 
 from connector_lab.client.errors import (
+    ConnectorJobCancelledError,
+    ConnectorJobFailedError,
     ConnectorJobTimeoutError,
 )
 from connector_lab.client.scan_models import (
@@ -95,11 +97,6 @@ class SecurityJobsConnector:
         self,
         job_id: str,
     ) -> ScanJobStatusResponse:
-        terminal_statuses = {
-            ScanJobStatus.COMPLETED,
-            ScanJobStatus.FAILED,
-            ScanJobStatus.CANCELLED,
-        }
         started_at = self._now_provider()
 
         while True:
@@ -112,8 +109,19 @@ class SecurityJobsConnector:
 
             job = await self.get_job(job_id)
 
-            if job.status in terminal_statuses:
+            if job.status is ScanJobStatus.COMPLETED:
                 return job
+
+            if job.status is ScanJobStatus.FAILED:
+                failure_detail = job.error or "Unknown security job failure"
+                raise ConnectorJobFailedError(
+                    f"Security job failed: {failure_detail}",
+                )
+
+            if job.status is ScanJobStatus.CANCELLED:
+                raise ConnectorJobCancelledError(
+                    "Security job was cancelled",
+                )
 
             await self._sleep_func(
                 self._poll_interval_seconds,

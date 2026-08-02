@@ -24,3 +24,11 @@ class ConnectorAuthorizationError(Exception):
 
 class ConnectorJobTimeoutError(Exception):
     """Raised when asynchronous job polling exceeds its global timeout."""
+
+
+class ConnectorJobFailedError(Exception):
+    """Raised when an asynchronous security job fails."""
+
+
+class ConnectorJobCancelledError(Exception):
+    """Raised when an asynchronous security job is cancelled."""
