@@ -249,3 +249,27 @@ async def test_unsuccessful_operation_returns_cached_typed_result(
     assert second_result == first_result.model_copy(
         update={"created": False},
     )
+
+
+@pytest.mark.asyncio
+async def test_scan_command_maps_failure_simulation_to_job_request() -> None:
+    security_jobs = FakeSecurityJobs()
+    workflow = SecurityScanWorkflow(
+        security_jobs=security_jobs,
+    )
+    command = SecurityScanCommand(
+        operation_id="operation-simulated-failure",
+        target="legacy-server.example.com",
+        scan_type=ScanType.VULNERABILITY,
+        simulate_failure=True,
+    )
+
+    await workflow.process(command)
+
+    assert len(security_jobs.create_requests) == 1
+
+    request = security_jobs.create_requests[0]
+    assert request.external_reference == ("operation-simulated-failure")
+    assert request.target == "legacy-server.example.com"
+    assert request.scan_type is ScanType.VULNERABILITY
+    assert request.simulate_failure is True
