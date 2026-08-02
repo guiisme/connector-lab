@@ -35,3 +35,63 @@ async def test_client_credentials_returns_access_token() -> None:
         "expires_in": 300,
         "scope": "alerts:read",
     }
+
+
+@pytest.mark.asyncio
+async def test_missing_client_credentials_returns_invalid_client() -> None:
+    transport = ASGITransport(app=app)
+
+    async with AsyncClient(
+        transport=transport,
+        base_url="http://test",
+    ) as client:
+        response = await client.post(
+            "/oauth/token",
+            data={
+                "grant_type": "client_credentials",
+                "scope": "alerts:read",
+            },
+        )
+
+    assert response.status_code == 401
+    assert response.headers["WWW-Authenticate"] == "Basic"
+    assert response.json() == {
+        "error": "invalid_client",
+    }
+
+
+@pytest.mark.parametrize(
+    ("username", "password"),
+    [
+        ("invalid-client", "connector-lab-client-secret"),
+        ("connector-lab-client", "invalid-secret"),
+    ],
+)
+@pytest.mark.asyncio
+async def test_invalid_client_credentials_are_rejected(
+    username: str,
+    password: str,
+) -> None:
+    transport = ASGITransport(app=app)
+
+    async with AsyncClient(
+        transport=transport,
+        base_url="http://test",
+    ) as client:
+        response = await client.post(
+            "/oauth/token",
+            data={
+                "grant_type": "client_credentials",
+                "scope": "alerts:read",
+            },
+            auth=BasicAuth(
+                username=username,
+                password=password,
+            ),
+        )
+
+    assert response.status_code == 401
+    assert response.headers["WWW-Authenticate"] == "Basic"
+    assert response.json() == {
+        "error": "invalid_client",
+    }

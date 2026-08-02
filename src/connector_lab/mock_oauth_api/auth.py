@@ -1,7 +1,9 @@
 import secrets
 
-from fastapi import HTTPException, status
+from fastapi import status
 from fastapi.security import HTTPBasicCredentials
+
+from connector_lab.mock_oauth_api.errors import OAuthError
 
 CLIENT_ID = "connector-lab-client"
 CLIENT_SECRET = "connector-lab-client-secret"
@@ -11,9 +13,9 @@ def authenticate_client(
     credentials: HTTPBasicCredentials | None,
 ) -> None:
     if credentials is None:
-        raise HTTPException(
+        raise OAuthError(
+            error="invalid_client",
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="invalid_client",
             headers={"WWW-Authenticate": "Basic"},
         )
 
@@ -27,8 +29,8 @@ def authenticate_client(
     )
 
     if not valid_client_id or not valid_client_secret:
-        raise HTTPException(
+        raise OAuthError(
+            error="invalid_client",
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="invalid_client",
             headers={"WWW-Authenticate": "Basic"},
         )

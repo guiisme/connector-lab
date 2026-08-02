@@ -1,6 +1,12 @@
 from typing import Annotated
 
-from fastapi import Depends, FastAPI, Form
+from fastapi import (
+    Depends,
+    FastAPI,
+    Form,
+    Request,
+)
+from fastapi.responses import JSONResponse
 from fastapi.security import (
     HTTPBasic,
     HTTPBasicCredentials,
@@ -9,6 +15,7 @@ from fastapi.security import (
 from connector_lab.mock_oauth_api.auth import (
     authenticate_client,
 )
+from connector_lab.mock_oauth_api.errors import OAuthError
 from connector_lab.mock_oauth_api.models import TokenResponse
 
 ACCESS_TOKEN = "connector-lab-access-token"
@@ -20,6 +27,18 @@ app = FastAPI(
     title="Mock OAuth 2.0 API",
     description="Educational OAuth 2.0 Authorization Server.",
 )
+
+
+@app.exception_handler(OAuthError)
+async def handle_oauth_error(
+    _request: Request,
+    error: OAuthError,
+) -> JSONResponse:
+    return JSONResponse(
+        status_code=error.status_code,
+        content={"error": error.error},
+        headers=error.headers,
+    )
 
 
 @app.post(
