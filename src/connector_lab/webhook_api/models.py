@@ -37,3 +37,6 @@ class WebhookAlertEvent(BaseModel):
 class WebhookAcceptedResponse(BaseModel):
     event_id: str
     status: str
+    alert_id: str | None = None
+    incident_id: str | None = None
+    created: bool | None = None
