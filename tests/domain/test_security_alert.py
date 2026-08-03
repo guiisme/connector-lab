@@ -259,3 +259,38 @@ def test_canonical_alert_rejects_duplicate_resource_reference() -> None:
                 resource,
             ),
         )
+
+
+def test_canonical_alert_rejects_vendor_specific_payload_fields() -> None:
+    alert_data: dict[str, object] = {
+        "alert_id": "canonical-alert-005",
+        "external_reference": "vendor-alert-991",
+        "title": "Vendor-specific payload",
+        "description": ("Canonical alerts must not retain raw vendor payloads."),
+        "severity": CanonicalAlertSeverity.UNKNOWN,
+        "detected_at": datetime(
+            2026,
+            8,
+            3,
+            15,
+            0,
+            tzinfo=UTC,
+        ),
+        "source": SecurityAlertSource(
+            vendor="Example Security",
+            product="Example Detection Platform",
+            source_id="tenant-001",
+        ),
+        "raw_vendor_payload": {
+            "vendor_severity": 99,
+            "internal_rule": "vendor-rule-001",
+        },
+    }
+
+    with pytest.raises(
+        ValidationError,
+        match="Extra inputs are not permitted",
+    ):
+        CanonicalSecurityAlert.model_validate(
+            alert_data,
+        )

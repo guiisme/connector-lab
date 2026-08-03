@@ -48,7 +48,10 @@ class SecurityAlertResourceType(StrEnum):
 
 
 class SecurityAlertSource(BaseModel):
-    model_config = ConfigDict(frozen=True)
+    model_config = ConfigDict(
+        frozen=True,
+        extra="forbid",
+    )
 
     vendor: NonBlankText
     product: NonBlankText
@@ -56,14 +59,20 @@ class SecurityAlertSource(BaseModel):
 
 
 class SecurityAlertEvidence(BaseModel):
-    model_config = ConfigDict(frozen=True)
+    model_config = ConfigDict(
+        frozen=True,
+        extra="forbid",
+    )
 
     evidence_type: SecurityAlertEvidenceType
     value: NonBlankText
 
 
 class SecurityAlertResourceReference(BaseModel):
-    model_config = ConfigDict(frozen=True)
+    model_config = ConfigDict(
+        frozen=True,
+        extra="forbid",
+    )
 
     resource_type: SecurityAlertResourceType
     resource_id: NonBlankText
@@ -71,7 +80,10 @@ class SecurityAlertResourceReference(BaseModel):
 
 
 class CanonicalSecurityAlert(BaseModel):
-    model_config = ConfigDict(frozen=True)
+    model_config = ConfigDict(
+        frozen=True,
+        extra="forbid",
+    )
 
     alert_id: NonBlankText
     external_reference: NonBlankText
