@@ -226,3 +226,55 @@ async def test_wait_for_job_records_global_job_timeout() -> None:
     assert snapshot.connection_failures == 0
     assert snapshot.request_timeouts == 0
     assert snapshot.durations_seconds == (5.0,)
+
+
+@pytest.mark.asyncio
+async def test_create_job_metric_preserves_operation_correlation() -> None:
+    clock_values = iter(
+        [
+            40.0,
+            40.25,
+        ],
+    )
+
+    def handle_create_request(request: Request) -> Response:
+        return Response(
+            status_code=202,
+            json={
+                "job_id": "SCAN-0001",
+                "external_reference": "operation-correlated",
+                "status": "pending",
+            },
+        )
+
+    metrics = InMemoryConnectorMetricsRecorder()
+    transport = MockTransport(handle_create_request)
+
+    async with AsyncClient(transport=transport) as http_client:
+        connector = SecurityJobsConnector(
+            base_url="https://mock-scan.local",
+            api_key="connector-lab-scan-secret",
+            http_client=http_client,
+            metrics_recorder=metrics,
+            monotonic_provider=lambda: next(clock_values),
+        )
+
+        await connector.create_job(
+            ScanJobCreateRequest(
+                external_reference="operation-correlated",
+                target="server.example.com",
+                scan_type=ScanType.VULNERABILITY,
+            ),
+            correlation_id="scan-correlation-metrics",
+        )
+
+    snapshot = metrics.snapshot()
+
+    assert len(snapshot.observations) == 1
+
+    observation = snapshot.observations[0]
+    assert observation.correlation_id == ("scan-correlation-metrics")
+    assert observation.component == "security_jobs_connector"
+    assert observation.operation == "create_job"
+    assert observation.outcome.value == "succeeded"
+    assert observation.duration_seconds == 0.25
