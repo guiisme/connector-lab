@@ -1,6 +1,7 @@
 from asyncio import sleep
 from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime
+from time import monotonic
 from uuid import uuid4
 
 from httpx import (
@@ -31,6 +32,13 @@ from connector_lab.observability.events import (
     OperationalEventOutcome,
     OperationalEventRecorder,
 )
+from connector_lab.observability.metrics import (
+    ConnectorFailureCategory,
+    ConnectorMetricObservation,
+    ConnectorMetricOutcome,
+    ConnectorMetricsRecorder,
+    NullConnectorMetricsRecorder,
+)
 
 DEFAULT_POLL_INTERVAL_SECONDS = 1.0
 DEFAULT_POLL_TIMEOUT_SECONDS = 60.0
@@ -41,6 +49,7 @@ SleepFunc = Callable[
 ]
 NowProvider = Callable[[], datetime]
 CorrelationIdProvider = Callable[[], str]
+MonotonicProvider = Callable[[], float]
 
 
 def new_correlation_id() -> str:
@@ -64,6 +73,8 @@ class SecurityJobsConnector:
         now_provider: NowProvider = utc_now,
         event_recorder: OperationalEventRecorder | None = None,
         correlation_id_provider: CorrelationIdProvider = (new_correlation_id),
+        metrics_recorder: ConnectorMetricsRecorder | None = None,
+        monotonic_provider: MonotonicProvider = monotonic,
     ) -> None:
         if poll_interval_seconds < 0:
             raise ValueError(
@@ -88,6 +99,12 @@ class SecurityJobsConnector:
             else NullOperationalEventRecorder()
         )
         self._correlation_id_provider = correlation_id_provider
+        self._metrics_recorder = (
+            metrics_recorder
+            if metrics_recorder is not None
+            else NullConnectorMetricsRecorder()
+        )
+        self._monotonic_provider = monotonic_provider
 
     def _record_operational_event(
         self,
@@ -104,6 +121,24 @@ class SecurityJobsConnector:
                 operation=operation,
                 outcome=outcome,
                 error_type=error_type,
+            ),
+        )
+
+    def _record_metric_observation(
+        self,
+        *,
+        operation: str,
+        started_at: float,
+        outcome: ConnectorMetricOutcome,
+        failure_category: (ConnectorFailureCategory | None) = None,
+    ) -> None:
+        self._metrics_recorder.record(
+            ConnectorMetricObservation(
+                component="security_jobs_connector",
+                operation=operation,
+                outcome=outcome,
+                duration_seconds=(self._monotonic_provider() - started_at),
+                failure_category=failure_category,
             ),
         )
 
@@ -128,6 +163,7 @@ class SecurityJobsConnector:
                 method="POST",
                 url=f"{self._base_url}/scan-jobs",
                 json_payload=request.model_dump(mode="json"),
+                operation="create_job",
             )
             created_job = ScanJobCreateResponse.model_validate(
                 response.json(),
@@ -172,6 +208,7 @@ class SecurityJobsConnector:
             response = await self._send_request(
                 method="GET",
                 url=f"{self._base_url}/scan-jobs/{job_id}",
+                operation="get_job",
             )
             job = ScanJobStatusResponse.model_validate(
                 response.json(),
@@ -250,6 +287,7 @@ class SecurityJobsConnector:
             response = await self._send_request(
                 method="DELETE",
                 url=f"{self._base_url}/scan-jobs/{job_id}",
+                operation="cancel_job",
             )
             job = ScanJobStatusResponse.model_validate(
                 response.json(),
@@ -274,10 +312,12 @@ class SecurityJobsConnector:
     async def _send_request(
         self,
         *,
+        operation: str,
         method: str,
         url: str,
         json_payload: object | None = None,
     ) -> Response:
+        started_at = self._monotonic_provider()
         headers = {
             "X-API-Key": self._api_key,
         }
@@ -297,10 +337,22 @@ class SecurityJobsConnector:
                     json=json_payload,
                 )
         except TimeoutException as error:
+            self._record_metric_observation(
+                operation=operation,
+                started_at=started_at,
+                outcome=ConnectorMetricOutcome.FAILED,
+                failure_category=(ConnectorFailureCategory.REQUEST_TIMEOUT),
+            )
             raise ConnectorTimeoutError(
                 "Security jobs request timed out",
             ) from error
         except ConnectError as error:
+            self._record_metric_observation(
+                operation=operation,
+                started_at=started_at,
+                outcome=ConnectorMetricOutcome.FAILED,
+                failure_category=(ConnectorFailureCategory.CONNECTION),
+            )
             raise ConnectorConnectionError(
                 "Security jobs endpoint is unavailable",
             ) from error
@@ -308,12 +360,30 @@ class SecurityJobsConnector:
         try:
             response.raise_for_status()
         except HTTPStatusError as error:
+            failure_category = (
+                ConnectorFailureCategory.AUTHENTICATION
+                if error.response.status_code == 401
+                else ConnectorFailureCategory.OTHER
+            )
+            self._record_metric_observation(
+                operation=operation,
+                started_at=started_at,
+                outcome=ConnectorMetricOutcome.FAILED,
+                failure_category=failure_category,
+            )
+
             if error.response.status_code == 401:
                 raise ConnectorAuthenticationError(
                     "Security jobs authentication failed",
                 ) from error
 
             raise
+
+        self._record_metric_observation(
+            operation=operation,
+            started_at=started_at,
+            outcome=ConnectorMetricOutcome.SUCCEEDED,
+        )
 
         return response
 
