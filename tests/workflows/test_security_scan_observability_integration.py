@@ -1,4 +1,5 @@
 import json
+from datetime import UTC, datetime, timedelta
 
 import pytest
 from httpx import (
@@ -8,6 +9,9 @@ from httpx import (
     Response,
 )
 
+from connector_lab.client.errors import (
+    ConnectorJobTimeoutError,
+)
 from connector_lab.client.scan_models import (
     ScanJobStatus,
     ScanType,
@@ -331,3 +335,121 @@ async def test_unsuccessful_scan_has_specific_correlated_telemetry(
     assert workflow_observation.outcome.value == "failed"
     assert workflow_observation.failure_category is not None
     assert workflow_observation.failure_category.value == (expected_failure_category)
+
+
+@pytest.mark.asyncio
+async def test_timed_out_scan_has_correlated_workflow_and_connector_telemetry() -> None:
+    fixed_now = datetime(
+        2026,
+        8,
+        3,
+        12,
+        0,
+        tzinfo=UTC,
+    )
+    clock_values = iter(
+        [
+            fixed_now,
+            fixed_now + timedelta(seconds=6),
+        ],
+    )
+    monotonic_values = iter(
+        [
+            30.0,
+            30.1,
+            30.2,
+            30.3,
+            30.4,
+            30.5,
+        ],
+    )
+
+    def now_provider() -> datetime:
+        return next(clock_values)
+
+    def monotonic_provider() -> float:
+        return next(monotonic_values)
+
+    def handle_request(request: Request) -> Response:
+        assert request.method == "POST"
+
+        return Response(
+            status_code=202,
+            json={
+                "job_id": "SCAN-0003",
+                "external_reference": "operation-timeout-e2e",
+                "status": "pending",
+            },
+        )
+
+    recorder = RecordingEventRecorder()
+    metrics = InMemoryConnectorMetricsRecorder()
+    transport = MockTransport(handle_request)
+
+    async with AsyncClient(transport=transport) as http_client:
+        connector = SecurityJobsConnector(
+            base_url="https://mock-scan.local",
+            api_key="connector-lab-scan-secret",
+            http_client=http_client,
+            poll_timeout_seconds=5.0,
+            now_provider=now_provider,
+            event_recorder=recorder,
+            metrics_recorder=metrics,
+            monotonic_provider=monotonic_provider,
+        )
+        workflow = SecurityScanWorkflow(
+            security_jobs=connector,
+            event_recorder=recorder,
+            metrics_recorder=metrics,
+            correlation_id_provider=(lambda: "scan-correlation-timeout-e2e"),
+            monotonic_provider=monotonic_provider,
+        )
+
+        with pytest.raises(
+            ConnectorJobTimeoutError,
+            match="Security job polling timed out",
+        ):
+            await workflow.process(
+                SecurityScanCommand(
+                    operation_id="operation-timeout-e2e",
+                    target="slow-server.example.com",
+                    scan_type=ScanType.VULNERABILITY,
+                ),
+            )
+
+    timeout_events = [
+        event
+        for event in recorder.events
+        if event.error_type == "ConnectorJobTimeoutError"
+    ]
+
+    assert len(timeout_events) == 1
+    assert timeout_events[0].component == ("security_scan_workflow")
+    assert timeout_events[0].outcome.value == "failed"
+    assert timeout_events[0].correlation_id == ("scan-correlation-timeout-e2e")
+
+    timeout_observations = [
+        observation
+        for observation in metrics.snapshot().observations
+        if (
+            observation.failure_category is not None
+            and observation.failure_category.value == "job_timeout"
+        )
+    ]
+
+    assert {observation.component for observation in timeout_observations} == {
+        "security_jobs_connector",
+        "security_scan_workflow",
+    }
+    assert {observation.operation for observation in timeout_observations} == {
+        "wait_for_job",
+        "process_scan",
+    }
+    assert {observation.correlation_id for observation in timeout_observations} == {
+        "scan-correlation-timeout-e2e",
+    }
+
+    snapshot = metrics.snapshot()
+
+    assert snapshot.job_timeouts == 2
+    assert snapshot.failed_requests == 2
