@@ -799,6 +799,68 @@ operation, outcome, duration, failure category, and correlation ID. API keys,
 authentication headers, targets, external references, and request payloads
 remain excluded.
 
+## Using the canonical security alert model
+
+`CanonicalSecurityAlert` represents security findings independently from any
+specific API or connector schema. Vendor connectors and future normalization
+adapters can map their responses into this stable domain contract.
+
+```python
+from datetime import UTC, datetime
+
+from connector_lab.domain.security_alert import (
+    CanonicalAlertSeverity,
+    CanonicalSecurityAlert,
+    SecurityAlertEvidence,
+    SecurityAlertEvidenceType,
+    SecurityAlertResourceReference,
+    SecurityAlertResourceType,
+    SecurityAlertSource,
+)
+
+alert = CanonicalSecurityAlert(
+    alert_id="canonical-alert-001",
+    external_reference="vendor-alert-987",
+    title="Unexpected remote connection",
+    description=("A protected host communicated with an unexpected address."),
+    severity=CanonicalAlertSeverity.HIGH,
+    detected_at=datetime.now(UTC),
+    source=SecurityAlertSource(
+        vendor="Example Security",
+        product="Example Detection Platform",
+        source_id="tenant-001",
+    ),
+    evidence=(
+        SecurityAlertEvidence(
+            evidence_type=(SecurityAlertEvidenceType.IP_ADDRESS),
+            value="192.0.2.10",
+        ),
+    ),
+    resources=(
+        SecurityAlertResourceReference(
+            resource_type=SecurityAlertResourceType.HOST,
+            resource_id="host-001",
+            display_name="application-server-01",
+        ),
+    ),
+)
+```
+
+The canonical contract:
+
+- uses a vendor-neutral severity scale from `unknown` to `critical`
+- preserves vendor, product, and source identity without retaining raw payloads
+- requires non-blank alert and source fields
+- requires timezone-aware detection timestamps
+- represents evidence and affected resources through typed immutable models
+- rejects duplicate evidence and resource references
+- rejects fields outside the canonical schema
+- remains independent from FastAPI, HTTPX, and connector response models
+
+Vendor-specific models remain at connector boundaries. Transformation into the
+canonical model will be implemented through independent normalization adapters
+in a later capability.
+
 ## Connector resilience
 
 The connector retries only responses with status `429 Too Many Requests`.
