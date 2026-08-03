@@ -1,4 +1,5 @@
 from collections.abc import Callable
+from time import monotonic
 from typing import Protocol
 from uuid import uuid4
 
@@ -23,8 +24,16 @@ from connector_lab.observability.events import (
     OperationalEventOutcome,
     OperationalEventRecorder,
 )
+from connector_lab.observability.metrics import (
+    ConnectorFailureCategory,
+    ConnectorMetricObservation,
+    ConnectorMetricOutcome,
+    ConnectorMetricsRecorder,
+    NullConnectorMetricsRecorder,
+)
 
 CorrelationIdProvider = Callable[[], str]
+MonotonicProvider = Callable[[], float]
 
 
 def new_correlation_id() -> str:
@@ -69,7 +78,9 @@ class SecurityScanWorkflow:
         *,
         security_jobs: SecurityJobs,
         event_recorder: OperationalEventRecorder | None = None,
-        correlation_id_provider: CorrelationIdProvider = new_correlation_id,
+        correlation_id_provider: CorrelationIdProvider = (new_correlation_id),
+        metrics_recorder: ConnectorMetricsRecorder | None = None,
+        monotonic_provider: MonotonicProvider = monotonic,
     ) -> None:
         self._security_jobs = security_jobs
         self._event_recorder = (
@@ -78,6 +89,12 @@ class SecurityScanWorkflow:
             else NullOperationalEventRecorder()
         )
         self._correlation_id_provider = correlation_id_provider
+        self._metrics_recorder = (
+            metrics_recorder
+            if metrics_recorder is not None
+            else NullConnectorMetricsRecorder()
+        )
+        self._monotonic_provider = monotonic_provider
         self._correlation_ids: dict[str, str] = {}
         self._correlations: dict[str, str] = {}
         self._results: dict[
@@ -103,6 +120,25 @@ class SecurityScanWorkflow:
             ),
         )
 
+    def _record_metric(
+        self,
+        *,
+        correlation_id: str,
+        started_at: float,
+        outcome: ConnectorMetricOutcome,
+        failure_category: (ConnectorFailureCategory | None) = None,
+    ) -> None:
+        self._metrics_recorder.record(
+            ConnectorMetricObservation(
+                correlation_id=correlation_id,
+                component="security_scan_workflow",
+                operation="process_scan",
+                outcome=outcome,
+                duration_seconds=(self._monotonic_provider() - started_at),
+                failure_category=failure_category,
+            ),
+        )
+
     async def process(
         self,
         command: SecurityScanCommand,
@@ -114,6 +150,8 @@ class SecurityScanWorkflow:
         if correlation_id is None:
             correlation_id = self._correlation_id_provider()
             self._correlation_ids[command.operation_id] = correlation_id
+
+        workflow_started_at = self._monotonic_provider()
 
         self._record_event(
             correlation_id=correlation_id,
@@ -134,6 +172,12 @@ class SecurityScanWorkflow:
                 correlation_id=correlation_id,
                 outcome=OperationalEventOutcome.SUCCEEDED,
             )
+            self._record_metric(
+                correlation_id=correlation_id,
+                started_at=workflow_started_at,
+                outcome=ConnectorMetricOutcome.SUCCEEDED,
+            )
+
             return existing_result.model_copy(
                 update={"created": False},
             )
@@ -160,6 +204,8 @@ class SecurityScanWorkflow:
 
         event_outcome: OperationalEventOutcome
         error_type: str | None
+        metric_outcome: ConnectorMetricOutcome
+        failure_category: ConnectorFailureCategory | None
 
         try:
             completed_job = await self._security_jobs.wait_for_job(
@@ -176,6 +222,8 @@ class SecurityScanWorkflow:
             )
             event_outcome = OperationalEventOutcome.FAILED
             error_type = type(error).__name__
+            metric_outcome = ConnectorMetricOutcome.FAILED
+            failure_category = ConnectorFailureCategory.OTHER
         except ConnectorJobCancelledError as error:
             workflow_result = SecurityScanWorkflowResult(
                 operation_id=command.operation_id,
@@ -186,11 +234,19 @@ class SecurityScanWorkflow:
             )
             event_outcome = OperationalEventOutcome.FAILED
             error_type = type(error).__name__
+            metric_outcome = ConnectorMetricOutcome.FAILED
+            failure_category = ConnectorFailureCategory.OTHER
         except ConnectorJobTimeoutError as error:
             self._record_event(
                 correlation_id=correlation_id,
                 outcome=OperationalEventOutcome.FAILED,
                 error_type=type(error).__name__,
+            )
+            self._record_metric(
+                correlation_id=correlation_id,
+                started_at=workflow_started_at,
+                outcome=ConnectorMetricOutcome.FAILED,
+                failure_category=(ConnectorFailureCategory.JOB_TIMEOUT),
             )
             raise
         else:
@@ -204,6 +260,8 @@ class SecurityScanWorkflow:
             )
             event_outcome = OperationalEventOutcome.SUCCEEDED
             error_type = None
+            metric_outcome = ConnectorMetricOutcome.SUCCEEDED
+            failure_category = None
 
         self._results[command.operation_id] = workflow_result
 
@@ -211,6 +269,12 @@ class SecurityScanWorkflow:
             correlation_id=correlation_id,
             outcome=event_outcome,
             error_type=error_type,
+        )
+        self._record_metric(
+            correlation_id=correlation_id,
+            started_at=workflow_started_at,
+            outcome=metric_outcome,
+            failure_category=failure_category,
         )
 
         return workflow_result
