@@ -14,10 +14,15 @@ class ConnectorFailureCategory(StrEnum):
     CONNECTION = "connection"
     REQUEST_TIMEOUT = "request_timeout"
     JOB_TIMEOUT = "job_timeout"
+    JOB_FAILED = "job_failed"
+    JOB_CANCELLED = "job_cancelled"
     OTHER = "other"
 
 
 class ConnectorMetricObservation(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
+    correlation_id: str | None = None
     component: str = Field(min_length=1)
     operation: str = Field(min_length=1)
     outcome: ConnectorMetricOutcome
@@ -36,6 +41,7 @@ class ConnectorTelemetrySnapshot(BaseModel):
     request_timeouts: int
     job_timeouts: int
     durations_seconds: tuple[float, ...]
+    observations: tuple[ConnectorMetricObservation, ...]
 
 
 class ConnectorMetricsRecorder(Protocol):
@@ -63,11 +69,15 @@ class InMemoryConnectorMetricsRecorder:
         self._request_timeouts = 0
         self._job_timeouts = 0
         self._durations_seconds: list[float] = []
+        self._observations: list[ConnectorMetricObservation] = []
 
     def record(
         self,
         observation: ConnectorMetricObservation,
     ) -> None:
+        self._observations.append(
+            observation.model_copy(deep=True),
+        )
         self._total_requests += 1
         self._durations_seconds.append(
             observation.duration_seconds,
@@ -99,5 +109,8 @@ class InMemoryConnectorMetricsRecorder:
             job_timeouts=self._job_timeouts,
             durations_seconds=tuple(
                 self._durations_seconds,
+            ),
+            observations=tuple(
+                observation.model_copy(deep=True) for observation in self._observations
             ),
         )

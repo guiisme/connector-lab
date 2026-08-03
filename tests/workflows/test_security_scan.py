@@ -27,6 +27,8 @@ class FakeSecurityJobs:
     async def create_job(
         self,
         request: ScanJobCreateRequest,
+        *,
+        correlation_id: str | None = None,
     ) -> ScanJobCreateResponse:
         self.create_requests.append(request)
 
@@ -39,6 +41,8 @@ class FakeSecurityJobs:
     async def wait_for_job(
         self,
         job_id: str,
+        *,
+        correlation_id: str | None = None,
     ) -> ScanJobStatusResponse:
         self.waited_job_ids.append(job_id)
 
@@ -62,6 +66,8 @@ class TimeoutThenCompleteSecurityJobs(FakeSecurityJobs):
     async def wait_for_job(
         self,
         job_id: str,
+        *,
+        correlation_id: str | None = None,
     ) -> ScanJobStatusResponse:
         self.waited_job_ids.append(job_id)
         self.wait_attempts += 1
@@ -95,6 +101,8 @@ class UnsuccessfulSecurityJobs(FakeSecurityJobs):
     async def wait_for_job(
         self,
         job_id: str,
+        *,
+        correlation_id: str | None = None,
     ) -> ScanJobStatusResponse:
         self.waited_job_ids.append(job_id)
         raise self._wait_error

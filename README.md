@@ -731,6 +731,74 @@ The in-memory collector is isolated per instance and intended only for this
 educational cycle. It has no dependency on HTTPX or an external monitoring
 vendor.
 
+## Observing security scans end to end
+
+`SecurityScanWorkflow` and `SecurityJobsConnector` can share the same event and
+metrics recorders. A single correlation ID then traces one logical scan across
+workflow orchestration, job creation, polling, terminal outcomes, and
+idempotent result reuse.
+
+```python
+import logging
+
+from connector_lab.observability.events import (
+    LoggingOperationalEventRecorder,
+)
+from connector_lab.observability.metrics import (
+    InMemoryConnectorMetricsRecorder,
+)
+from connector_lab.workflows.security_scan import (
+    SecurityScanWorkflow,
+)
+
+event_recorder = LoggingOperationalEventRecorder(
+    logger=logging.getLogger(
+        "connector_lab.operational",
+    ),
+)
+metrics_recorder = InMemoryConnectorMetricsRecorder()
+
+connector = SecurityJobsConnector(
+    base_url="http://127.0.0.1:8004",
+    api_key="connector-lab-scan-secret",
+    http_client=http_client,
+    event_recorder=event_recorder,
+    metrics_recorder=metrics_recorder,
+)
+
+workflow = SecurityScanWorkflow(
+    security_jobs=connector,
+    event_recorder=event_recorder,
+    metrics_recorder=metrics_recorder,
+)
+
+result = await workflow.process(command)
+snapshot = metrics_recorder.snapshot()
+```
+
+The workflow generates one correlation ID for a new operation and propagates it
+to job creation and every polling request. The same correlation is retained
+when an operation resumes after a timeout or reuses a cached terminal result.
+
+End-to-end telemetry represents:
+
+- completed scans as successful workflow and connector observations
+- failed jobs with the `job_failed` category
+- cancelled jobs with the `job_cancelled` category
+- global polling timeouts with the `job_timeout` category
+- idempotent reuse through the `reuse_scan_result` operational event
+- workflow and connector durations measured through injectable monotonic clocks
+
+A timed-out operation preserves its job and correlation mappings. Retrying the
+same operation resumes the existing job instead of creating a duplicate.
+Reprocessing an operation with a cached terminal result performs no additional
+HTTP requests.
+
+Telemetry observations include only operational fields such as component,
+operation, outcome, duration, failure category, and correlation ID. API keys,
+authentication headers, targets, external references, and request payloads
+remain excluded.
+
 ## Connector resilience
 
 The connector retries only responses with status `429 Too Many Requests`.
