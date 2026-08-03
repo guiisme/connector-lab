@@ -89,13 +89,14 @@ class SecurityScanWorkflow:
         *,
         correlation_id: str,
         outcome: OperationalEventOutcome,
+        operation: str = "process_scan",
         error_type: str | None = None,
     ) -> None:
         self._event_recorder.record(
             OperationalEvent(
                 correlation_id=correlation_id,
                 component="security_scan_workflow",
-                operation="process_scan",
+                operation=operation,
                 outcome=outcome,
                 error_type=error_type,
             ),
@@ -123,6 +124,11 @@ class SecurityScanWorkflow:
         )
 
         if existing_result is not None:
+            self._record_event(
+                correlation_id=correlation_id,
+                operation="reuse_scan_result",
+                outcome=OperationalEventOutcome.SUCCEEDED,
+            )
             self._record_event(
                 correlation_id=correlation_id,
                 outcome=OperationalEventOutcome.SUCCEEDED,
