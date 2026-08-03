@@ -98,3 +98,51 @@ class CanonicalSecurityAlert(BaseModel):
             )
 
         return detected_at
+
+    @field_validator("evidence")
+    @classmethod
+    def validate_unique_evidence(
+        cls,
+        evidence: tuple[SecurityAlertEvidence, ...],
+    ) -> tuple[SecurityAlertEvidence, ...]:
+        evidence_keys = {
+            (
+                item.evidence_type,
+                item.value,
+            )
+            for item in evidence
+        }
+
+        if len(evidence_keys) != len(evidence):
+            raise ValueError(
+                "evidence entries must be unique",
+            )
+
+        return evidence
+
+    @field_validator("resources")
+    @classmethod
+    def validate_unique_resource_references(
+        cls,
+        resources: tuple[
+            SecurityAlertResourceReference,
+            ...,
+        ],
+    ) -> tuple[
+        SecurityAlertResourceReference,
+        ...,
+    ]:
+        resource_keys = {
+            (
+                item.resource_type,
+                item.resource_id,
+            )
+            for item in resources
+        }
+
+        if len(resource_keys) != len(resources):
+            raise ValueError(
+                "resource references must be unique",
+            )
+
+        return resources

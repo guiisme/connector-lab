@@ -186,3 +186,76 @@ def test_canonical_alert_preserves_typed_evidence_and_resources() -> None:
     assert alert.resources[0].resource_type is (SecurityAlertResourceType.HOST)
     assert alert.resources[0].resource_id == "host-001"
     assert alert.resources[0].display_name == ("application-server-01")
+
+
+def test_canonical_alert_rejects_duplicate_evidence() -> None:
+    evidence = SecurityAlertEvidence(
+        evidence_type=SecurityAlertEvidenceType.DOMAIN,
+        value="example.test",
+    )
+
+    with pytest.raises(
+        ValidationError,
+        match="evidence entries must be unique",
+    ):
+        CanonicalSecurityAlert(
+            alert_id="canonical-alert-003",
+            external_reference="vendor-alert-989",
+            title="Repeated domain evidence",
+            description="The same evidence was supplied twice.",
+            severity=CanonicalAlertSeverity.LOW,
+            detected_at=datetime(
+                2026,
+                8,
+                3,
+                14,
+                0,
+                tzinfo=UTC,
+            ),
+            source=SecurityAlertSource(
+                vendor="Example Security",
+                product="Example Detection Platform",
+                source_id="tenant-001",
+            ),
+            evidence=(
+                evidence,
+                evidence,
+            ),
+        )
+
+
+def test_canonical_alert_rejects_duplicate_resource_reference() -> None:
+    resource = SecurityAlertResourceReference(
+        resource_type=SecurityAlertResourceType.CLOUD_RESOURCE,
+        resource_id="cloud-resource-001",
+        display_name="production-workload",
+    )
+
+    with pytest.raises(
+        ValidationError,
+        match="resource references must be unique",
+    ):
+        CanonicalSecurityAlert(
+            alert_id="canonical-alert-004",
+            external_reference="vendor-alert-990",
+            title="Repeated affected resource",
+            description=("The same affected resource was supplied twice."),
+            severity=CanonicalAlertSeverity.HIGH,
+            detected_at=datetime(
+                2026,
+                8,
+                3,
+                14,
+                30,
+                tzinfo=UTC,
+            ),
+            source=SecurityAlertSource(
+                vendor="Example Security",
+                product="Example Detection Platform",
+                source_id="tenant-001",
+            ),
+            resources=(
+                resource,
+                resource,
+            ),
+        )
