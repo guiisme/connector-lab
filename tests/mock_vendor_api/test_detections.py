@@ -47,3 +47,73 @@ async def test_list_detections_returns_vendor_specific_first_page() -> None:
         ],
         "next_cursor": "cursor-2",
     }
+
+
+@pytest.mark.asyncio
+async def test_list_detections_uses_cursor_for_next_page() -> None:
+    transport = ASGITransport(app=app)
+
+    async with AsyncClient(
+        transport=transport,
+        base_url="http://test",
+    ) as client:
+        response = await client.get(
+            "/detections",
+            headers={
+                "X-Vendor-API-Key": ("connector-lab-vendor-secret"),
+            },
+            params={
+                "limit": 1,
+                "cursor": "cursor-2",
+            },
+        )
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "records": [
+            {
+                "detection_key": "DET-1002",
+                "event_name": "Unexpected domain communication",
+                "details": ("A protected workload contacted an unusual domain."),
+                "risk_score": 45,
+                "event_time": "2026-08-03T10:05:00Z",
+                "tenant_ref": "vendor-tenant-001",
+                "observables": [
+                    {
+                        "kind": "domain",
+                        "indicator": "example.test",
+                    },
+                ],
+                "affected_entity": {
+                    "category": "cloud_object",
+                    "key": "cloud-object-002",
+                    "label": "analytics-workload",
+                },
+            },
+        ],
+        "next_cursor": None,
+    }
+
+
+@pytest.mark.asyncio
+async def test_list_detections_rejects_unknown_cursor() -> None:
+    transport = ASGITransport(app=app)
+
+    async with AsyncClient(
+        transport=transport,
+        base_url="http://test",
+    ) as client:
+        response = await client.get(
+            "/detections",
+            headers={
+                "X-Vendor-API-Key": ("connector-lab-vendor-secret"),
+            },
+            params={
+                "cursor": "cursor-999",
+            },
+        )
+
+    assert response.status_code == 400
+    assert response.json() == {
+        "detail": "Invalid cursor",
+    }

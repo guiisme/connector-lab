@@ -135,6 +135,13 @@ def create_app() -> FastAPI:
         cursor: str | None = None,
     ) -> VendorDetectionPage:
         start_index = resolve_cursor(cursor)
+
+        if cursor is not None and start_index >= len(detections):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Invalid cursor",
+            )
+
         end_index = start_index + limit
         records = detections[start_index:end_index]
 
