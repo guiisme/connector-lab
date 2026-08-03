@@ -1,0 +1,142 @@
+from datetime import UTC, datetime
+
+import pytest
+from pydantic import ValidationError
+
+from connector_lab.domain.security_alert import (
+    CanonicalAlertSeverity,
+    CanonicalSecurityAlert,
+    SecurityAlertSource,
+)
+
+
+def test_canonical_alert_preserves_identity_and_source_metadata() -> None:
+    detected_at = datetime(
+        2026,
+        8,
+        3,
+        12,
+        30,
+        tzinfo=UTC,
+    )
+    source = SecurityAlertSource(
+        vendor="Example Security",
+        product="Example Detection Platform",
+        source_id="tenant-001",
+    )
+
+    alert = CanonicalSecurityAlert(
+        alert_id="canonical-alert-001",
+        external_reference="vendor-alert-987",
+        title="Suspicious administrative activity",
+        description=("Administrative behavior exceeded the expected baseline."),
+        severity=CanonicalAlertSeverity.HIGH,
+        detected_at=detected_at,
+        source=source,
+    )
+
+    assert alert.alert_id == "canonical-alert-001"
+    assert alert.external_reference == "vendor-alert-987"
+    assert alert.title == "Suspicious administrative activity"
+    assert alert.severity is CanonicalAlertSeverity.HIGH
+    assert alert.detected_at == detected_at
+    assert alert.source.vendor == "Example Security"
+    assert alert.source.product == ("Example Detection Platform")
+    assert alert.source.source_id == "tenant-001"
+    assert alert.evidence == ()
+
+    with pytest.raises(
+        ValidationError,
+        match="Instance is frozen",
+    ):
+        alert.title = "Changed title"
+
+
+@pytest.mark.parametrize(
+    "field_name",
+    [
+        "alert_id",
+        "external_reference",
+        "title",
+        "description",
+    ],
+)
+def test_canonical_alert_rejects_blank_required_text(
+    field_name: str,
+) -> None:
+    alert_data: dict[str, object] = {
+        "alert_id": "canonical-alert-001",
+        "external_reference": "vendor-alert-987",
+        "title": "Suspicious administrative activity",
+        "description": "Administrative behavior detected.",
+        "severity": CanonicalAlertSeverity.HIGH,
+        "detected_at": datetime(
+            2026,
+            8,
+            3,
+            12,
+            30,
+            tzinfo=UTC,
+        ),
+        "source": SecurityAlertSource(
+            vendor="Example Security",
+            product="Example Detection Platform",
+            source_id="tenant-001",
+        ),
+    }
+    alert_data[field_name] = "   "
+
+    with pytest.raises(ValidationError):
+        CanonicalSecurityAlert.model_validate(
+            alert_data,
+        )
+
+
+@pytest.mark.parametrize(
+    "field_name",
+    [
+        "vendor",
+        "product",
+        "source_id",
+    ],
+)
+def test_security_alert_source_rejects_blank_text(
+    field_name: str,
+) -> None:
+    source_data = {
+        "vendor": "Example Security",
+        "product": "Example Detection Platform",
+        "source_id": "tenant-001",
+    }
+    source_data[field_name] = "   "
+
+    with pytest.raises(ValidationError):
+        SecurityAlertSource.model_validate(
+            source_data,
+        )
+
+
+def test_canonical_alert_rejects_timestamp_without_timezone() -> None:
+    with pytest.raises(
+        ValidationError,
+        match="detected_at must be timezone-aware",
+    ):
+        CanonicalSecurityAlert(
+            alert_id="canonical-alert-001",
+            external_reference="vendor-alert-987",
+            title="Suspicious administrative activity",
+            description="Administrative behavior detected.",
+            severity=CanonicalAlertSeverity.HIGH,
+            detected_at=datetime(
+                2026,
+                8,
+                3,
+                12,
+                30,
+            ),
+            source=SecurityAlertSource(
+                vendor="Example Security",
+                product="Example Detection Platform",
+                source_id="tenant-001",
+            ),
+        )
