@@ -681,6 +681,56 @@ Started and successful operations use the `INFO` level. Failed operations use
 API keys, bearer tokens, client secrets, targets, external references, request
 headers, and payloads are intentionally excluded from operational events.
 
+## Collecting connector metrics
+
+`SecurityJobsConnector` also accepts an independent metrics recorder. When no
+recorder is provided, a null implementation preserves the original connector
+behavior.
+
+Use `InMemoryConnectorMetricsRecorder` for local inspection and educational
+tests:
+
+```python
+from connector_lab.observability.metrics import (
+    InMemoryConnectorMetricsRecorder,
+)
+
+metrics = InMemoryConnectorMetricsRecorder()
+
+connector = SecurityJobsConnector(
+    base_url="http://127.0.0.1:8004",
+    api_key="connector-lab-scan-secret",
+    http_client=http_client,
+    metrics_recorder=metrics,
+)
+
+await connector.create_and_wait(request)
+
+snapshot = metrics.snapshot()
+```
+
+A telemetry snapshot exposes:
+
+- total recorded requests and polling timeout observations
+- successful and failed request counts
+- authentication failure count
+- connection failure count
+- request timeout count
+- global job polling timeout count
+- individual operation durations in seconds
+
+HTTP request durations are measured with a monotonic clock. The connector
+accepts an injectable monotonic provider so duration behavior can be tested
+without real waiting.
+
+Snapshots are typed and frozen. Obtaining a snapshot creates an independent
+view of the current metrics; later recorder updates do not mutate previously
+returned snapshots.
+
+The in-memory collector is isolated per instance and intended only for this
+educational cycle. It has no dependency on HTTPX or an external monitoring
+vendor.
+
 ## Connector resilience
 
 The connector retries only responses with status `429 Too Many Requests`.
