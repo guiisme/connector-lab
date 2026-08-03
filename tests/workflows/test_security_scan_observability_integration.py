@@ -453,3 +453,137 @@ async def test_timed_out_scan_has_correlated_workflow_and_connector_telemetry() 
 
     assert snapshot.job_timeouts == 2
     assert snapshot.failed_requests == 2
+
+
+@pytest.mark.asyncio
+async def test_reprocessed_scan_reuses_result_and_correlation_without_http() -> None:
+    request_methods: list[str] = []
+    generated_correlation_ids: list[str] = []
+    monotonic_values = iter(
+        [
+            40.0,
+            40.1,
+            40.2,
+            40.3,
+            40.4,
+            40.5,
+            40.6,
+            40.7,
+            40.8,
+        ],
+    )
+
+    def monotonic_provider() -> float:
+        return next(monotonic_values)
+
+    def correlation_id_provider() -> str:
+        correlation_id = "scan-correlation-reuse-e2e"
+        generated_correlation_ids.append(correlation_id)
+        return correlation_id
+
+    def handle_request(request: Request) -> Response:
+        request_methods.append(request.method)
+
+        if request.method == "POST":
+            return Response(
+                status_code=202,
+                json={
+                    "job_id": "SCAN-0004",
+                    "external_reference": "operation-reuse-e2e",
+                    "status": "pending",
+                },
+            )
+
+        return Response(
+            status_code=200,
+            json={
+                "job_id": "SCAN-0004",
+                "external_reference": "operation-reuse-e2e",
+                "status": "completed",
+                "result": {
+                    "total_findings": 3,
+                    "critical_findings": 1,
+                    "high_findings": 2,
+                },
+            },
+        )
+
+    recorder = RecordingEventRecorder()
+    metrics = InMemoryConnectorMetricsRecorder()
+    transport = MockTransport(handle_request)
+
+    async with AsyncClient(transport=transport) as http_client:
+        connector = SecurityJobsConnector(
+            base_url="https://mock-scan.local",
+            api_key="connector-lab-scan-secret",
+            http_client=http_client,
+            event_recorder=recorder,
+            metrics_recorder=metrics,
+            monotonic_provider=monotonic_provider,
+        )
+        workflow = SecurityScanWorkflow(
+            security_jobs=connector,
+            event_recorder=recorder,
+            metrics_recorder=metrics,
+            correlation_id_provider=correlation_id_provider,
+            monotonic_provider=monotonic_provider,
+        )
+        command = SecurityScanCommand(
+            operation_id="operation-reuse-e2e",
+            target="server.example.com",
+            scan_type=ScanType.VULNERABILITY,
+        )
+
+        first_result = await workflow.process(command)
+        second_result = await workflow.process(command)
+
+    assert first_result.created is True
+    assert second_result.created is False
+    assert second_result.job_id == first_result.job_id
+    assert second_result.status is ScanJobStatus.COMPLETED
+
+    assert generated_correlation_ids == [
+        "scan-correlation-reuse-e2e",
+    ]
+    assert request_methods == [
+        "POST",
+        "GET",
+    ]
+
+    reuse_events = [
+        event for event in recorder.events if event.operation == "reuse_scan_result"
+    ]
+
+    assert len(reuse_events) == 1
+    assert reuse_events[0].component == ("security_scan_workflow")
+    assert reuse_events[0].outcome.value == "succeeded"
+    assert reuse_events[0].correlation_id == ("scan-correlation-reuse-e2e")
+
+    observations = metrics.snapshot().observations
+
+    connector_observations = [
+        observation
+        for observation in observations
+        if observation.component == "security_jobs_connector"
+    ]
+    workflow_observations = [
+        observation
+        for observation in observations
+        if observation.component == "security_scan_workflow"
+    ]
+
+    assert [observation.operation for observation in connector_observations] == [
+        "create_job",
+        "get_job",
+    ]
+    assert len(workflow_observations) == 2
+    assert all(
+        observation.operation == "process_scan" for observation in workflow_observations
+    )
+    assert all(
+        observation.outcome.value == "succeeded"
+        for observation in workflow_observations
+    )
+    assert {observation.correlation_id for observation in observations} == {
+        "scan-correlation-reuse-e2e",
+    }
