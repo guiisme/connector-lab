@@ -7,6 +7,7 @@ from pydantic import BaseModel, Field
 from connector_lab.client.errors import (
     ConnectorJobCancelledError,
     ConnectorJobFailedError,
+    ConnectorJobTimeoutError,
 )
 from connector_lab.client.scan_models import (
     ScanJobCreateRequest,
@@ -157,6 +158,9 @@ class SecurityScanWorkflow:
             self._correlations[command.operation_id] = job_id
             created = True
 
+        event_outcome: OperationalEventOutcome
+        error_type: str | None
+
         try:
             completed_job = await self._security_jobs.wait_for_job(
                 job_id,
@@ -170,6 +174,8 @@ class SecurityScanWorkflow:
                 error=str(error),
                 created=created,
             )
+            event_outcome = OperationalEventOutcome.FAILED
+            error_type = type(error).__name__
         except ConnectorJobCancelledError as error:
             workflow_result = SecurityScanWorkflowResult(
                 operation_id=command.operation_id,
@@ -178,6 +184,15 @@ class SecurityScanWorkflow:
                 error=str(error),
                 created=created,
             )
+            event_outcome = OperationalEventOutcome.FAILED
+            error_type = type(error).__name__
+        except ConnectorJobTimeoutError as error:
+            self._record_event(
+                correlation_id=correlation_id,
+                outcome=OperationalEventOutcome.FAILED,
+                error_type=type(error).__name__,
+            )
+            raise
         else:
             workflow_result = SecurityScanWorkflowResult(
                 operation_id=command.operation_id,
@@ -187,12 +202,15 @@ class SecurityScanWorkflow:
                 error=completed_job.error,
                 created=created,
             )
+            event_outcome = OperationalEventOutcome.SUCCEEDED
+            error_type = None
 
         self._results[command.operation_id] = workflow_result
 
         self._record_event(
             correlation_id=correlation_id,
-            outcome=OperationalEventOutcome.SUCCEEDED,
+            outcome=event_outcome,
+            error_type=error_type,
         )
 
         return workflow_result

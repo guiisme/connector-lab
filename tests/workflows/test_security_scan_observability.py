@@ -1,5 +1,10 @@
 import pytest
 
+from connector_lab.client.errors import (
+    ConnectorJobCancelledError,
+    ConnectorJobFailedError,
+    ConnectorJobTimeoutError,
+)
 from connector_lab.client.scan_models import (
     ScanJobCreateRequest,
     ScanJobCreateResponse,
@@ -65,6 +70,28 @@ class CorrelatedSecurityJobs:
                 high_findings=2,
             ),
         )
+
+
+class UnsuccessfulCorrelatedSecurityJobs(
+    CorrelatedSecurityJobs,
+):
+    def __init__(
+        self,
+        *,
+        wait_error: Exception,
+    ) -> None:
+        super().__init__()
+        self._wait_error = wait_error
+
+    async def wait_for_job(
+        self,
+        job_id: str,
+        *,
+        correlation_id: str | None = None,
+    ) -> ScanJobStatusResponse:
+        assert correlation_id is not None
+        self.wait_correlation_ids.append(correlation_id)
+        raise self._wait_error
 
 
 @pytest.mark.asyncio
@@ -178,5 +205,88 @@ async def test_reprocessed_scan_preserves_correlation_and_records_reuse() -> Non
             component="security_scan_workflow",
             operation="process_scan",
             outcome=OperationalEventOutcome.SUCCEEDED,
+        ),
+    ]
+
+
+@pytest.mark.parametrize(
+    (
+        "wait_error",
+        "expected_error_type",
+    ),
+    [
+        (
+            ConnectorJobFailedError(
+                "Security job failed: Simulated scan failure",
+            ),
+            "ConnectorJobFailedError",
+        ),
+        (
+            ConnectorJobCancelledError(
+                "Security job was cancelled",
+            ),
+            "ConnectorJobCancelledError",
+        ),
+        (
+            ConnectorJobTimeoutError(
+                "Security job polling timed out",
+            ),
+            "ConnectorJobTimeoutError",
+        ),
+    ],
+)
+@pytest.mark.asyncio
+async def test_unsuccessful_scan_records_correlated_failure_event(
+    wait_error: Exception,
+    expected_error_type: str,
+) -> None:
+    security_jobs = UnsuccessfulCorrelatedSecurityJobs(
+        wait_error=wait_error,
+    )
+    recorder = RecordingEventRecorder()
+    workflow = SecurityScanWorkflow(
+        security_jobs=security_jobs,
+        event_recorder=recorder,
+        correlation_id_provider=(lambda: "scan-correlation-unsuccessful"),
+    )
+    command = SecurityScanCommand(
+        operation_id="operation-unsuccessful",
+        target="server.example.com",
+        scan_type=ScanType.VULNERABILITY,
+    )
+
+    if isinstance(wait_error, ConnectorJobTimeoutError):
+        with pytest.raises(
+            ConnectorJobTimeoutError,
+            match="Security job polling timed out",
+        ):
+            await workflow.process(command)
+    else:
+        result = await workflow.process(command)
+
+        assert result.status in {
+            ScanJobStatus.FAILED,
+            ScanJobStatus.CANCELLED,
+        }
+
+    assert security_jobs.create_correlation_ids == [
+        "scan-correlation-unsuccessful",
+    ]
+    assert security_jobs.wait_correlation_ids == [
+        "scan-correlation-unsuccessful",
+    ]
+    assert recorder.events == [
+        OperationalEvent(
+            correlation_id="scan-correlation-unsuccessful",
+            component="security_scan_workflow",
+            operation="process_scan",
+            outcome=OperationalEventOutcome.STARTED,
+        ),
+        OperationalEvent(
+            correlation_id="scan-correlation-unsuccessful",
+            component="security_scan_workflow",
+            operation="process_scan",
+            outcome=OperationalEventOutcome.FAILED,
+            error_type=expected_error_type,
         ),
     ]
