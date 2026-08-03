@@ -55,3 +55,33 @@ def test_metrics_recorder_returns_immutable_typed_snapshot() -> None:
         0.25,
         0.5,
     )
+
+
+def test_snapshot_preserves_correlated_metric_observations() -> None:
+    recorder = InMemoryConnectorMetricsRecorder()
+    observation = ConnectorMetricObservation(
+        correlation_id="scan-correlation-metrics",
+        component="security_jobs_connector",
+        operation="create_job",
+        outcome=ConnectorMetricOutcome.SUCCEEDED,
+        duration_seconds=0.25,
+    )
+
+    recorder.record(observation)
+
+    snapshot = recorder.snapshot()
+
+    assert snapshot.observations == (observation,)
+    assert snapshot.observations[0].correlation_id == ("scan-correlation-metrics")
+
+    recorder.record(
+        ConnectorMetricObservation(
+            correlation_id="another-correlation",
+            component="security_jobs_connector",
+            operation="get_job",
+            outcome=ConnectorMetricOutcome.SUCCEEDED,
+            duration_seconds=0.1,
+        ),
+    )
+
+    assert snapshot.observations == (observation,)
