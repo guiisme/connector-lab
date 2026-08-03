@@ -237,12 +237,19 @@ class SecurityJobsConnector:
         correlation_id: str | None = None,
     ) -> ScanJobStatusResponse:
         resolved_correlation_id = correlation_id or self._correlation_id_provider()
+        polling_started_at = self._monotonic_provider()
         started_at = self._now_provider()
 
         while True:
             elapsed_seconds = (self._now_provider() - started_at).total_seconds()
 
             if elapsed_seconds >= self._poll_timeout_seconds:
+                self._record_metric_observation(
+                    operation="wait_for_job",
+                    started_at=polling_started_at,
+                    outcome=ConnectorMetricOutcome.FAILED,
+                    failure_category=(ConnectorFailureCategory.JOB_TIMEOUT),
+                )
                 raise ConnectorJobTimeoutError(
                     "Security job polling timed out",
                 )

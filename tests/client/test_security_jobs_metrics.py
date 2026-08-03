@@ -1,3 +1,5 @@
+from datetime import UTC, datetime, timedelta
+
 import pytest
 from httpx import (
     AsyncClient,
@@ -11,6 +13,7 @@ from httpx import (
 from connector_lab.client.errors import (
     ConnectorAuthenticationError,
     ConnectorConnectionError,
+    ConnectorJobTimeoutError,
     ConnectorTimeoutError,
 )
 from connector_lab.client.scan_models import (
@@ -161,3 +164,65 @@ async def test_create_job_records_categorized_request_failure(
     ) == expected_failure_counts
     assert snapshot.job_timeouts == 0
     assert snapshot.durations_seconds == (0.5,)
+
+
+@pytest.mark.asyncio
+async def test_wait_for_job_records_global_job_timeout() -> None:
+    started_at = datetime(
+        2026,
+        8,
+        3,
+        12,
+        0,
+        tzinfo=UTC,
+    )
+    clock_values = iter(
+        [
+            started_at,
+            started_at + timedelta(seconds=6),
+        ],
+    )
+    monotonic_values = iter(
+        [
+            30.0,
+            35.0,
+        ],
+    )
+
+    def unexpected_request(request: Request) -> Response:
+        raise AssertionError(
+            "Polling timeout should occur before HTTP request",
+        )
+
+    metrics = InMemoryConnectorMetricsRecorder()
+    transport = MockTransport(unexpected_request)
+
+    async with AsyncClient(transport=transport) as http_client:
+        connector = SecurityJobsConnector(
+            base_url="https://mock-scan.local",
+            api_key="connector-lab-scan-secret",
+            http_client=http_client,
+            poll_timeout_seconds=5.0,
+            now_provider=lambda: next(clock_values),
+            metrics_recorder=metrics,
+            monotonic_provider=lambda: next(
+                monotonic_values,
+            ),
+        )
+
+        with pytest.raises(
+            ConnectorJobTimeoutError,
+            match="Security job polling timed out",
+        ):
+            await connector.wait_for_job("SCAN-0001")
+
+    snapshot = metrics.snapshot()
+
+    assert snapshot.total_requests == 1
+    assert snapshot.successful_requests == 0
+    assert snapshot.failed_requests == 1
+    assert snapshot.job_timeouts == 1
+    assert snapshot.authentication_failures == 0
+    assert snapshot.connection_failures == 0
+    assert snapshot.request_timeouts == 0
+    assert snapshot.durations_seconds == (5.0,)
