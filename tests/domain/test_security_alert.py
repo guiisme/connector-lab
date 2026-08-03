@@ -6,6 +6,10 @@ from pydantic import ValidationError
 from connector_lab.domain.security_alert import (
     CanonicalAlertSeverity,
     CanonicalSecurityAlert,
+    SecurityAlertEvidence,
+    SecurityAlertEvidenceType,
+    SecurityAlertResourceReference,
+    SecurityAlertResourceType,
     SecurityAlertSource,
 )
 
@@ -140,3 +144,45 @@ def test_canonical_alert_rejects_timestamp_without_timezone() -> None:
                 source_id="tenant-001",
             ),
         )
+
+
+def test_canonical_alert_preserves_typed_evidence_and_resources() -> None:
+    evidence = SecurityAlertEvidence(
+        evidence_type=(SecurityAlertEvidenceType.IP_ADDRESS),
+        value="192.0.2.10",
+    )
+    resource = SecurityAlertResourceReference(
+        resource_type=SecurityAlertResourceType.HOST,
+        resource_id="host-001",
+        display_name="application-server-01",
+    )
+
+    alert = CanonicalSecurityAlert(
+        alert_id="canonical-alert-002",
+        external_reference="vendor-alert-988",
+        title="Unexpected remote connection",
+        description=("A protected host communicated with an unexpected address."),
+        severity=CanonicalAlertSeverity.MEDIUM,
+        detected_at=datetime(
+            2026,
+            8,
+            3,
+            13,
+            0,
+            tzinfo=UTC,
+        ),
+        source=SecurityAlertSource(
+            vendor="Example Security",
+            product="Example Detection Platform",
+            source_id="tenant-001",
+        ),
+        evidence=(evidence,),
+        resources=(resource,),
+    )
+
+    assert alert.evidence == (evidence,)
+    assert alert.evidence[0].evidence_type is (SecurityAlertEvidenceType.IP_ADDRESS)
+    assert alert.resources == (resource,)
+    assert alert.resources[0].resource_type is (SecurityAlertResourceType.HOST)
+    assert alert.resources[0].resource_id == "host-001"
+    assert alert.resources[0].display_name == ("application-server-01")

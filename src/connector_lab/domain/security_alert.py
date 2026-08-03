@@ -27,6 +27,26 @@ class CanonicalAlertSeverity(StrEnum):
     CRITICAL = "critical"
 
 
+class SecurityAlertEvidenceType(StrEnum):
+    IP_ADDRESS = "ip_address"
+    DOMAIN = "domain"
+    HOSTNAME = "hostname"
+    URL = "url"
+    FILE_HASH = "file_hash"
+    USER_ACCOUNT = "user_account"
+    PROCESS = "process"
+    OTHER = "other"
+
+
+class SecurityAlertResourceType(StrEnum):
+    HOST = "host"
+    USER_ACCOUNT = "user_account"
+    CLOUD_RESOURCE = "cloud_resource"
+    APPLICATION = "application"
+    NETWORK = "network"
+    OTHER = "other"
+
+
 class SecurityAlertSource(BaseModel):
     model_config = ConfigDict(frozen=True)
 
@@ -38,8 +58,16 @@ class SecurityAlertSource(BaseModel):
 class SecurityAlertEvidence(BaseModel):
     model_config = ConfigDict(frozen=True)
 
-    evidence_type: NonBlankText
+    evidence_type: SecurityAlertEvidenceType
     value: NonBlankText
+
+
+class SecurityAlertResourceReference(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
+    resource_type: SecurityAlertResourceType
+    resource_id: NonBlankText
+    display_name: NonBlankText | None = None
 
 
 class CanonicalSecurityAlert(BaseModel):
@@ -53,6 +81,10 @@ class CanonicalSecurityAlert(BaseModel):
     detected_at: datetime
     source: SecurityAlertSource
     evidence: tuple[SecurityAlertEvidence, ...] = ()
+    resources: tuple[
+        SecurityAlertResourceReference,
+        ...,
+    ] = ()
 
     @field_validator("detected_at")
     @classmethod
