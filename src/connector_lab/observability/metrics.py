@@ -14,6 +14,8 @@ class ConnectorFailureCategory(StrEnum):
     CONNECTION = "connection"
     REQUEST_TIMEOUT = "request_timeout"
     JOB_TIMEOUT = "job_timeout"
+    JOB_FAILED = "job_failed"
+    JOB_CANCELLED = "job_cancelled"
     OTHER = "other"
 
 

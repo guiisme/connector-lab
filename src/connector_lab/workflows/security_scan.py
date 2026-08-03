@@ -223,7 +223,7 @@ class SecurityScanWorkflow:
             event_outcome = OperationalEventOutcome.FAILED
             error_type = type(error).__name__
             metric_outcome = ConnectorMetricOutcome.FAILED
-            failure_category = ConnectorFailureCategory.OTHER
+            failure_category = ConnectorFailureCategory.JOB_FAILED
         except ConnectorJobCancelledError as error:
             workflow_result = SecurityScanWorkflowResult(
                 operation_id=command.operation_id,
@@ -235,7 +235,7 @@ class SecurityScanWorkflow:
             event_outcome = OperationalEventOutcome.FAILED
             error_type = type(error).__name__
             metric_outcome = ConnectorMetricOutcome.FAILED
-            failure_category = ConnectorFailureCategory.OTHER
+            failure_category = ConnectorFailureCategory.JOB_CANCELLED
         except ConnectorJobTimeoutError as error:
             self._record_event(
                 correlation_id=correlation_id,
