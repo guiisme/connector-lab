@@ -54,6 +54,22 @@ class VendorDetection(BaseModel):
     affected_entity: VendorAffectedEntity
 
 
+class VendorDetectionListRequest(BaseModel):
+    model_config = ConfigDict(
+        frozen=True,
+        extra="forbid",
+    )
+
+    limit: int = Field(
+        ge=1,
+        le=100,
+    )
+    cursor: str | None = Field(
+        default=None,
+        min_length=1,
+    )
+
+
 class VendorDetectionPage(BaseModel):
     model_config = ConfigDict(
         frozen=True,

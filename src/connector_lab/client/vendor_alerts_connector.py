@@ -18,6 +18,7 @@ from connector_lab.client.errors import (
 )
 from connector_lab.client.vendor_alerts_models import (
     VendorDetection,
+    VendorDetectionListRequest,
     VendorDetectionPage,
 )
 
@@ -48,12 +49,13 @@ class VendorAlertsConnector:
         *,
         cursor: str | None = None,
     ) -> VendorDetectionPage:
-        params: dict[str, str | int] = {
-            "limit": self._page_size,
-        }
-
-        if cursor is not None:
-            params["cursor"] = cursor
+        request = VendorDetectionListRequest(
+            limit=self._page_size,
+            cursor=cursor,
+        )
+        params: dict[str, str | int] = request.model_dump(
+            exclude_none=True,
+        )
 
         response = await self._send_request(
             params=params,

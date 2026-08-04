@@ -873,7 +873,8 @@ asyncio.run(main())
 
 The connector:
 
-- validates responses through immutable vendor-specific models
+- builds pagination requests and validates responses through immutable
+  vendor-specific models
 - follows cursor pages automatically
 - rejects repeated cursors instead of entering a pagination loop
 - maps authentication, connection, and timeout failures
