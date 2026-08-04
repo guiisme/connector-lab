@@ -14,6 +14,7 @@ from connector_lab.client.errors import (
     ConnectorAuthenticationError,
     ConnectorConnectionError,
     ConnectorMalformedResponseError,
+    ConnectorPaginationError,
     ConnectorTimeoutError,
 )
 from connector_lab.client.vendor_alerts_connector import (
@@ -305,3 +306,48 @@ async def test_list_detection_page_maps_malformed_response(
             match="Vendor alerts response is malformed",
         ):
             await connector.list_detection_page()
+
+
+@pytest.mark.asyncio
+async def test_list_all_detections_rejects_repeated_cursor() -> None:
+    request_count = 0
+
+    def handle_repeated_cursor(
+        request: Request,
+    ) -> Response:
+        nonlocal request_count
+        request_count += 1
+
+        if request_count > 2:
+            raise AssertionError(
+                "Repeated cursor caused another HTTP request",
+            )
+
+        return Response(
+            status_code=200,
+            json={
+                "records": [],
+                "next_cursor": "cursor-repeated",
+            },
+        )
+
+    transport = MockTransport(
+        handle_repeated_cursor,
+    )
+
+    async with AsyncClient(
+        transport=transport,
+    ) as http_client:
+        connector = VendorAlertsConnector(
+            base_url="https://vendor.example",
+            api_key="connector-lab-vendor-secret",
+            http_client=http_client,
+        )
+
+        with pytest.raises(
+            ConnectorPaginationError,
+            match="Vendor alerts pagination repeated a cursor",
+        ):
+            await connector.list_all_detections()
+
+    assert request_count == 2

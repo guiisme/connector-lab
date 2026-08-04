@@ -13,6 +13,7 @@ from connector_lab.client.errors import (
     ConnectorAuthenticationError,
     ConnectorConnectionError,
     ConnectorMalformedResponseError,
+    ConnectorPaginationError,
     ConnectorTimeoutError,
 )
 from connector_lab.client.vendor_alerts_models import (
@@ -75,6 +76,7 @@ class VendorAlertsConnector:
         self,
     ) -> tuple[VendorDetection, ...]:
         detections: list[VendorDetection] = []
+        seen_cursors: set[str] = set()
         cursor: str | None = None
 
         while True:
@@ -83,10 +85,18 @@ class VendorAlertsConnector:
             )
             detections.extend(page.records)
 
-            if page.next_cursor is None:
+            next_cursor = page.next_cursor
+
+            if next_cursor is None:
                 return tuple(detections)
 
-            cursor = page.next_cursor
+            if next_cursor in seen_cursors:
+                raise ConnectorPaginationError(
+                    "Vendor alerts pagination repeated a cursor",
+                )
+
+            seen_cursors.add(next_cursor)
+            cursor = next_cursor
 
     async def _send_request(
         self,
