@@ -1,5 +1,16 @@
-from httpx import AsyncClient
+from httpx import (
+    AsyncClient,
+    ConnectError,
+    HTTPStatusError,
+    Response,
+    TimeoutException,
+)
 
+from connector_lab.client.errors import (
+    ConnectorAuthenticationError,
+    ConnectorConnectionError,
+    ConnectorTimeoutError,
+)
 from connector_lab.client.vendor_alerts_models import (
     VendorDetection,
     VendorDetectionPage,
@@ -39,14 +50,9 @@ class VendorAlertsConnector:
         if cursor is not None:
             params["cursor"] = cursor
 
-        response = await self._http_client.get(
-            f"{self._base_url}/detections",
-            headers={
-                "X-Vendor-API-Key": self._api_key,
-            },
+        response = await self._send_request(
             params=params,
         )
-        response.raise_for_status()
 
         return VendorDetectionPage.model_validate(
             response.json(),
@@ -68,3 +74,37 @@ class VendorAlertsConnector:
                 return tuple(detections)
 
             cursor = page.next_cursor
+
+    async def _send_request(
+        self,
+        *,
+        params: dict[str, str | int],
+    ) -> Response:
+        try:
+            response = await self._http_client.get(
+                f"{self._base_url}/detections",
+                headers={
+                    "X-Vendor-API-Key": self._api_key,
+                },
+                params=params,
+            )
+        except TimeoutException as error:
+            raise ConnectorTimeoutError(
+                "Vendor alerts request timed out",
+            ) from error
+        except ConnectError as error:
+            raise ConnectorConnectionError(
+                "Vendor alerts endpoint is unavailable",
+            ) from error
+
+        try:
+            response.raise_for_status()
+        except HTTPStatusError as error:
+            if error.response.status_code == 401:
+                raise ConnectorAuthenticationError(
+                    "Vendor alerts authentication failed",
+                ) from error
+
+            raise
+
+        return response

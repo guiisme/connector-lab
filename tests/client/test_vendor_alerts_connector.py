@@ -3,11 +3,18 @@ from datetime import UTC, datetime
 import pytest
 from httpx import (
     AsyncClient,
+    ConnectError,
     MockTransport,
+    ReadTimeout,
     Request,
     Response,
 )
 
+from connector_lab.client.errors import (
+    ConnectorAuthenticationError,
+    ConnectorConnectionError,
+    ConnectorTimeoutError,
+)
 from connector_lab.client.vendor_alerts_connector import (
     VendorAlertsConnector,
 )
@@ -176,3 +183,69 @@ async def test_list_all_detections_traverses_cursor_pages() -> None:
     ]
     assert detections[1].observables[0].kind is (VendorObservableKind.DOMAIN)
     assert detections[1].affected_entity.category is (VendorEntityCategory.CLOUD_OBJECT)
+
+
+@pytest.mark.parametrize(
+    (
+        "failure_kind",
+        "expected_error",
+        "expected_message",
+    ),
+    [
+        (
+            "authentication",
+            ConnectorAuthenticationError,
+            "Vendor alerts authentication failed",
+        ),
+        (
+            "connection",
+            ConnectorConnectionError,
+            "Vendor alerts endpoint is unavailable",
+        ),
+        (
+            "timeout",
+            ConnectorTimeoutError,
+            "Vendor alerts request timed out",
+        ),
+    ],
+)
+@pytest.mark.asyncio
+async def test_list_detection_page_maps_request_failure(
+    failure_kind: str,
+    expected_error: type[Exception],
+    expected_message: str,
+) -> None:
+    def handle_failure(request: Request) -> Response:
+        if failure_kind == "authentication":
+            return Response(
+                status_code=401,
+                json={
+                    "detail": "Invalid vendor API key",
+                },
+            )
+
+        if failure_kind == "connection":
+            raise ConnectError(
+                "Vendor endpoint unavailable",
+                request=request,
+            )
+
+        raise ReadTimeout(
+            "Vendor request timed out",
+            request=request,
+        )
+
+    transport = MockTransport(handle_failure)
+
+    async with AsyncClient(transport=transport) as http_client:
+        connector = VendorAlertsConnector(
+            base_url="https://vendor.example",
+            api_key="invalid-vendor-key",
+            http_client=http_client,
+        )
+
+        with pytest.raises(
+            expected_error,
+            match=expected_message,
+        ):
+            await connector.list_detection_page()
