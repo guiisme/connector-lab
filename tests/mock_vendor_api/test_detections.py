@@ -117,3 +117,63 @@ async def test_list_detections_rejects_unknown_cursor() -> None:
     assert response.json() == {
         "detail": "Invalid cursor",
     }
+
+
+@pytest.mark.parametrize(
+    "headers",
+    [
+        None,
+        {
+            "X-Vendor-API-Key": "invalid-vendor-key",
+        },
+    ],
+)
+@pytest.mark.asyncio
+async def test_list_detections_rejects_invalid_authentication(
+    headers: dict[str, str] | None,
+) -> None:
+    transport = ASGITransport(app=app)
+
+    async with AsyncClient(
+        transport=transport,
+        base_url="http://test",
+    ) as client:
+        response = await client.get(
+            "/detections",
+            headers=headers,
+        )
+
+    assert response.status_code == 401
+    assert response.json() == {
+        "detail": "Invalid vendor API key",
+    }
+
+
+@pytest.mark.parametrize(
+    "limit",
+    [
+        0,
+        101,
+    ],
+)
+@pytest.mark.asyncio
+async def test_list_detections_rejects_limit_outside_contract(
+    limit: int,
+) -> None:
+    transport = ASGITransport(app=app)
+
+    async with AsyncClient(
+        transport=transport,
+        base_url="http://test",
+    ) as client:
+        response = await client.get(
+            "/detections",
+            headers={
+                "X-Vendor-API-Key": ("connector-lab-vendor-secret"),
+            },
+            params={
+                "limit": limit,
+            },
+        )
+
+    assert response.status_code == 422
