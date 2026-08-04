@@ -799,6 +799,93 @@ operation, outcome, duration, failure category, and correlation ID. API keys,
 authentication headers, targets, external references, and request payloads
 remain excluded.
 
+## Using the second vendor detections API
+
+The second simulated cybersecurity vendor exposes a schema and pagination
+contract that are independent from the original alerts API.
+
+Start the vendor API:
+
+```bash
+uv run uvicorn connector_lab.mock_vendor_api.app:app \
+  --host 127.0.0.1 \
+  --port 8005
+```
+
+The interactive API documentation is available at:
+
+- <http://127.0.0.1:8005/docs>
+
+Retrieve the first cursor page:
+
+```bash
+curl \
+  -H "X-Vendor-API-Key: connector-lab-vendor-secret" \
+  "http://127.0.0.1:8005/detections?limit=1"
+```
+
+The vendor contract uses:
+
+- `detection_key` instead of the original alert identifier
+- `event_name` and `details` for descriptive fields
+- numeric `risk_score` values from `0` to `100`
+- `event_time` for the detection timestamp
+- `tenant_ref` for the vendor source
+- typed `observables` and one `affected_entity`
+- opaque `next_cursor` values instead of page numbers
+
+The API requires the independent `X-Vendor-API-Key` credential. Its fixed
+credential and deterministic records exist only for this educational lab.
+
+Use `VendorAlertsConnector` to retrieve and validate every cursor page:
+
+```python
+import asyncio
+
+from httpx import AsyncClient
+
+from connector_lab.client.vendor_alerts_connector import (
+    VendorAlertsConnector,
+)
+
+
+async def main() -> None:
+    async with AsyncClient(timeout=5.0) as http_client:
+        connector = VendorAlertsConnector(
+            base_url="http://127.0.0.1:8005",
+            api_key="connector-lab-vendor-secret",
+            http_client=http_client,
+            page_size=1,
+        )
+
+        detections = await connector.list_all_detections()
+
+    for detection in detections:
+        print(
+            detection.detection_key,
+            detection.risk_score,
+            detection.event_name,
+        )
+
+
+asyncio.run(main())
+```
+
+The connector:
+
+- validates responses through immutable vendor-specific models
+- follows cursor pages automatically
+- rejects repeated cursors instead of entering a pagination loop
+- maps authentication, connection, and timeout failures
+- maps invalid JSON and incompatible schemas to
+  `ConnectorMalformedResponseError`
+- keeps vendor-specific models independent from
+  `CanonicalSecurityAlert`
+
+Mapping vendor detections into the canonical security alert contract belongs to
+the independent normalization workflow and is intentionally not performed by
+this connector.
+
 ## Using the canonical security alert model
 
 `CanonicalSecurityAlert` represents security findings independently from any
@@ -888,4 +975,5 @@ uv run pytest
 
 - `src/connector_lab/mock_api`: simulated cybersecurity product API
 - `src/connector_lab/client`: connector responsible for consuming the API
+- `src/connector_lab/mock_vendor_api`: second simulated vendor detections API
 - `tests`: automated tests
