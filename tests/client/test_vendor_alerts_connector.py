@@ -82,3 +82,97 @@ async def test_list_detection_page_sends_typed_vendor_request() -> None:
     assert detection.observables[0].kind is (VendorObservableKind.IP)
     assert detection.affected_entity.category is (VendorEntityCategory.WORKLOAD)
     assert page.next_cursor == "cursor-2"
+
+
+@pytest.mark.asyncio
+async def test_list_all_detections_traverses_cursor_pages() -> None:
+    requested_urls: list[str] = []
+
+    def handle_request(request: Request) -> Response:
+        requested_urls.append(str(request.url))
+
+        if request.url.params.get("cursor") is None:
+            return Response(
+                status_code=200,
+                json={
+                    "records": [
+                        {
+                            "detection_key": "DET-1001",
+                            "event_name": "Suspicious sign-in pattern",
+                            "details": (
+                                "Multiple unusual authentication attempts detected."
+                            ),
+                            "risk_score": 85,
+                            "event_time": "2026-08-03T10:00:00Z",
+                            "tenant_ref": "vendor-tenant-001",
+                            "observables": [
+                                {
+                                    "kind": "ip",
+                                    "indicator": "192.0.2.10",
+                                },
+                            ],
+                            "affected_entity": {
+                                "category": "workload",
+                                "key": "asset-001",
+                                "label": "application-server-01",
+                            },
+                        },
+                    ],
+                    "next_cursor": "cursor-2",
+                },
+            )
+
+        assert request.url.params["cursor"] == "cursor-2"
+
+        return Response(
+            status_code=200,
+            json={
+                "records": [
+                    {
+                        "detection_key": "DET-1002",
+                        "event_name": "Unexpected domain communication",
+                        "details": (
+                            "A protected workload contacted an unusual domain."
+                        ),
+                        "risk_score": 45,
+                        "event_time": "2026-08-03T10:05:00Z",
+                        "tenant_ref": "vendor-tenant-001",
+                        "observables": [
+                            {
+                                "kind": "domain",
+                                "indicator": "example.test",
+                            },
+                        ],
+                        "affected_entity": {
+                            "category": "cloud_object",
+                            "key": "cloud-object-002",
+                            "label": "analytics-workload",
+                        },
+                    },
+                ],
+                "next_cursor": None,
+            },
+        )
+
+    transport = MockTransport(handle_request)
+
+    async with AsyncClient(transport=transport) as http_client:
+        connector = VendorAlertsConnector(
+            base_url="https://vendor.example",
+            api_key="connector-lab-vendor-secret",
+            http_client=http_client,
+            page_size=1,
+        )
+
+        detections = await connector.list_all_detections()
+
+    assert requested_urls == [
+        "https://vendor.example/detections?limit=1",
+        "https://vendor.example/detections?limit=1&cursor=cursor-2",
+    ]
+    assert [detection.detection_key for detection in detections] == [
+        "DET-1001",
+        "DET-1002",
+    ]
+    assert detections[1].observables[0].kind is (VendorObservableKind.DOMAIN)
+    assert detections[1].affected_entity.category is (VendorEntityCategory.CLOUD_OBJECT)

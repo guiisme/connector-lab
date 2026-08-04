@@ -1,6 +1,7 @@
 from httpx import AsyncClient
 
 from connector_lab.client.vendor_alerts_models import (
+    VendorDetection,
     VendorDetectionPage,
 )
 
@@ -50,3 +51,20 @@ class VendorAlertsConnector:
         return VendorDetectionPage.model_validate(
             response.json(),
         )
+
+    async def list_all_detections(
+        self,
+    ) -> tuple[VendorDetection, ...]:
+        detections: list[VendorDetection] = []
+        cursor: str | None = None
+
+        while True:
+            page = await self.list_detection_page(
+                cursor=cursor,
+            )
+            detections.extend(page.records)
+
+            if page.next_cursor is None:
+                return tuple(detections)
+
+            cursor = page.next_cursor
