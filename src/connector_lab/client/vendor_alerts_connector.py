@@ -1,3 +1,5 @@
+from json import JSONDecodeError
+
 from httpx import (
     AsyncClient,
     ConnectError,
@@ -5,10 +7,12 @@ from httpx import (
     Response,
     TimeoutException,
 )
+from pydantic import ValidationError
 
 from connector_lab.client.errors import (
     ConnectorAuthenticationError,
     ConnectorConnectionError,
+    ConnectorMalformedResponseError,
     ConnectorTimeoutError,
 )
 from connector_lab.client.vendor_alerts_models import (
@@ -54,9 +58,18 @@ class VendorAlertsConnector:
             params=params,
         )
 
-        return VendorDetectionPage.model_validate(
-            response.json(),
-        )
+        try:
+            response_payload = response.json()
+            return VendorDetectionPage.model_validate(
+                response_payload,
+            )
+        except (
+            JSONDecodeError,
+            ValidationError,
+        ) as error:
+            raise ConnectorMalformedResponseError(
+                "Vendor alerts response is malformed",
+            ) from error
 
     async def list_all_detections(
         self,

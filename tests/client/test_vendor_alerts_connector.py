@@ -13,6 +13,7 @@ from httpx import (
 from connector_lab.client.errors import (
     ConnectorAuthenticationError,
     ConnectorConnectionError,
+    ConnectorMalformedResponseError,
     ConnectorTimeoutError,
 )
 from connector_lab.client.vendor_alerts_connector import (
@@ -247,5 +248,60 @@ async def test_list_detection_page_maps_request_failure(
         with pytest.raises(
             expected_error,
             match=expected_message,
+        ):
+            await connector.list_detection_page()
+
+
+@pytest.mark.parametrize(
+    "malformed_response_kind",
+    [
+        "invalid_json",
+        "invalid_schema",
+    ],
+)
+@pytest.mark.asyncio
+async def test_list_detection_page_maps_malformed_response(
+    malformed_response_kind: str,
+) -> None:
+    def handle_malformed_response(
+        request: Request,
+    ) -> Response:
+        if malformed_response_kind == "invalid_json":
+            return Response(
+                status_code=200,
+                content=b"{invalid-json",
+                headers={
+                    "Content-Type": "application/json",
+                },
+            )
+
+        return Response(
+            status_code=200,
+            json={
+                "records": [
+                    {
+                        "unexpected_vendor_field": "invalid",
+                    },
+                ],
+                "next_cursor": None,
+            },
+        )
+
+    transport = MockTransport(
+        handle_malformed_response,
+    )
+
+    async with AsyncClient(
+        transport=transport,
+    ) as http_client:
+        connector = VendorAlertsConnector(
+            base_url="https://vendor.example",
+            api_key="connector-lab-vendor-secret",
+            http_client=http_client,
+        )
+
+        with pytest.raises(
+            ConnectorMalformedResponseError,
+            match="Vendor alerts response is malformed",
         ):
             await connector.list_detection_page()
