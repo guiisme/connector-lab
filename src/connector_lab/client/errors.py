@@ -32,3 +32,7 @@ class ConnectorJobFailedError(Exception):
 
 class ConnectorJobCancelledError(Exception):
     """Raised when an asynchronous security job is cancelled."""
+
+
+class ConnectorMalformedResponseError(Exception):
+    """Raised when an external API returns an incompatible response."""
