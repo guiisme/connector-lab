@@ -9,3 +9,9 @@ class AlertNormalizationError(Exception):
     ) -> None:
         self.vendor = vendor
         super().__init__(message)
+
+
+class AlertNormalizationConflictError(
+    AlertNormalizationError,
+):
+    """Raised when one canonical identity has conflicting data."""
