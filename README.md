@@ -945,9 +945,52 @@ The canonical contract:
 - rejects fields outside the canonical schema
 - remains independent from FastAPI, HTTPX, and connector response models
 
-Vendor-specific models remain at connector boundaries. Transformation into the
-canonical model will be implemented through independent normalization adapters
-in a later capability.
+Vendor-specific models remain at connector boundaries. Independent
+normalization adapters transform them into the canonical model before workflow
+processing.
+
+## Normalizing alerts from multiple vendors
+
+The multi-vendor normalization workflow combines the original alerts API and
+the second vendor detections API into one immutable collection of
+`CanonicalSecurityAlert` objects.
+
+The normalization pipeline separates responsibilities:
+
+1. connectors retrieve and validate vendor-specific responses
+2. normalized alert sources bridge connectors to their adapters
+3. adapters map vendor fields into the canonical security contract
+4. the workflow aggregates canonical alerts without inspecting vendor schemas
+5. repeated identical alerts are deduplicated by canonical `alert_id`
+
+`MockCyberAlertNormalizationAdapter` maps the original alert severity directly.
+`VendorDetectionNormalizationAdapter` converts numeric risk scores through the
+following deterministic contract:
+
+| Risk score | Canonical severity |
+| --- | --- |
+| `0` | `informational` |
+| `1–39` | `low` |
+| `40–59` | `medium` |
+| `60–79` | `high` |
+| `80–100` | `critical` |
+
+The second vendor adapter also maps:
+
+- observables into typed canonical evidence
+- affected entities into typed resource references
+- `tenant_ref` into canonical source metadata
+- `detection_key` into the external reference and deterministic canonical ID
+
+Canonical IDs include vendor, source, and external identity. Identical alerts
+with the same canonical ID produce one result. Conflicting representations with
+the same ID raise `AlertNormalizationConflictError` instead of silently losing
+data.
+
+The workflow records structured events and metric observations for each vendor.
+Telemetry includes only vendor-aware component names, operation, correlation
+ID, outcome, duration, failure category, and error type. Credentials, raw
+payloads, external references, and sensitive observable values remain excluded.
 
 ## Connector resilience
 
@@ -977,4 +1020,6 @@ uv run pytest
 - `src/connector_lab/mock_api`: simulated cybersecurity product API
 - `src/connector_lab/client`: connector responsible for consuming the API
 - `src/connector_lab/mock_vendor_api`: second simulated vendor detections API
+- `src/connector_lab/normalization`: vendor adapters and normalized alert sources
+- `src/connector_lab/workflows`: canonical multi-vendor aggregation workflows
 - `tests`: automated tests
